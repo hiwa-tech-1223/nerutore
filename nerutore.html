@@ -807,7 +807,7 @@ function openQuestions(beforeDate) {
 
 // 公開デモ（?demo を付けて開いたとき）だけ、自分のキーの代わりに中継サーバーを使う。
 // 中継サーバー側がこちらのキーを付けてOpenAIを呼ぶので、キーはこのファイルに書かない。
-const DEMO_PROXY = '';   // 例: https://nerutore-demo.<アカウント>.workers.dev
+const DEMO_PROXY = 'https://nerutore-demo.nerutore-demo.workers.dev';
 const demoMode   = PARAMS.has('demo') && !!DEMO_PROXY;
 const apiBase    = () => (demoMode ? DEMO_PROXY : 'https://api.openai.com');
 

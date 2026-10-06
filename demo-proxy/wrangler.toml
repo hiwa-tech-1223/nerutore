@@ -5,4 +5,4 @@ compatibility_date = "2025-09-01"
 # 1日あたりの利用回数を数えるための保管庫（wrangler kv namespace create DEMO_LIMITS で作る）
 [[kv_namespaces]]
 binding = "DEMO_LIMITS"
-id = "PLACEHOLDER"
+id = "ee3a5fd333b241878aa04c30013ebbe4"
