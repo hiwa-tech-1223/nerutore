@@ -1,0 +1,2196 @@
+<!DOCTYPE html>
+<!--
+  ねるトレ — 今日の自分を、5分で。
+  寝る前5分のジャーナリングアプリ（単一HTML）。
+  ・画面は「今夜」「1週間」の2つ。記録はこのブラウザの localStorage にだけ保存する。
+  ・AIのまとめは OpenAI API（LangChain.js 経由）で作る。サーバーは使わない。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ねるトレ — 今日の自分を、5分で。</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;600;700&family=Noto+Sans+JP:wght@300;400;500&display=swap">
+<style>
+  /* =====================================================================
+     1. デザインの基本値（色・書体）
+     夜に眩しくない暗い背景 ＋ 琥珀色のアクセント1色。見出しは明朝、本文はゴシック。
+     ===================================================================== */
+  :root{
+    --background:#0d0c14; --foreground:#e8e2d9; --card:#15131f;
+    --primary:#c9956b; --primary-foreground:#0d0c14;
+    --secondary-foreground:#a09880; --muted:#1a1827; --muted-foreground:#7a7260;
+    --border:rgba(201,149,107,.15); --tint:rgba(201,149,107,.08);
+    --accent:#d4a574;   /* 灯った文字（読み込み中に読まれている文・拾われた文） */
+    --good:#8bc382; --danger:#e07a6a;
+    --font-display:'Shippori Mincho','Yu Mincho','Hiragino Mincho ProN',Georgia,serif;
+    --font-body:'Noto Sans JP',-apple-system,BlinkMacSystemFont,'Hiragino Sans',system-ui,sans-serif;
+  }
+
+  /* =====================================================================
+     2. 土台
+     ===================================================================== */
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--background);color:var(--foreground);font-family:var(--font-body);font-weight:300;font-size:15px;line-height:1.75;-webkit-font-smoothing:antialiased}
+  body{min-height:100vh}
+  a{color:var(--primary)}
+  button{font-family:inherit;font-size:inherit;cursor:pointer}
+  textarea,input{font-family:inherit}
+  ::-webkit-scrollbar{width:0;height:0}
+
+  /* 文字の小さな部品 */
+  .serif{font-family:var(--font-display)}
+  .muted{color:var(--muted-foreground)}
+  .primary{color:var(--primary)}
+  .xs{font-size:12px}
+  .sm{font-size:13px}
+  .label{font-size:11px;letter-spacing:.18em;color:var(--muted-foreground);text-transform:uppercase}
+  .body{font-size:14px;color:var(--muted-foreground);line-height:1.8}
+
+  /* 背景の星空（JSで星を散らす） */
+  #stars{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:0}
+  #stars i{position:absolute;display:block;border-radius:50%;background:#fbe9c8;animation:twinkle var(--d,3s) ease-in-out infinite alternate}
+  #stars .glow{position:absolute;inset:0;background:radial-gradient(ellipse 60% 35% at 50% 0%,rgba(201,149,107,.07) 0%,transparent 70%)}
+
+  /* =====================================================================
+     3. レイアウト
+     ===================================================================== */
+  main{position:relative;z-index:1;max-width:512px;margin:0 auto;padding:0 0 84px;min-height:100vh}
+  section.view{display:none}
+  section.view.active{display:block}
+  .page{display:flex;flex-direction:column;gap:20px;padding:40px 20px 24px}
+  .stack{display:flex;flex-direction:column;gap:12px}
+  .row{display:flex;align-items:center;gap:12px}
+  .grow{flex:1}
+
+  /* =====================================================================
+     4. 部品
+     ===================================================================== */
+  /* 見出し */
+  h1.brand{font-family:var(--font-display);font-size:24px;font-weight:500;margin:0}
+  h2.t{font-family:var(--font-display);font-size:22px;font-weight:500;margin:0;line-height:1.5}
+  .tagline{font-size:13px;color:var(--primary)}
+  .sec{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:500;color:var(--primary)}
+  .sec svg{opacity:.7}
+
+  /* カード */
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px}
+  .card.dashed{background:rgba(201,149,107,.04);border:1px dashed rgba(201,149,107,.35)}
+  .card.alert{border-color:rgba(201,149,107,.45)}
+
+  /* ボタン（タップ領域は44px以上） */
+  .btn{border-radius:999px;padding:10px 20px;font-size:14px;font-weight:500;border:1px solid var(--border);background:var(--tint);color:var(--muted-foreground);transition:.25s;min-height:44px}
+  .btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
+  .btn.primary:disabled{background:rgba(201,149,107,.1);color:var(--muted-foreground);border-color:var(--border);cursor:default}
+  .btn.block{width:100%}
+  .btn.ghost{background:transparent}
+  .btn.link{background:none;border:0;color:var(--muted-foreground);opacity:.6;font-size:12px;padding:8px;min-height:36px}
+  .btn.link:hover{opacity:1}
+  .btn.tiny{font-size:12px;padding:6px 12px;min-height:32px;color:var(--primary);border-color:rgba(201,149,107,.3);background:rgba(201,149,107,.06)}
+
+  /* 入力欄 */
+  textarea.in{width:100%;min-height:120px;background:transparent;border:0;outline:0;resize:none;color:var(--foreground);font-size:15px;line-height:1.75;font-weight:300;caret-color:var(--primary)}
+  textarea.in::placeholder{color:var(--foreground);opacity:.3}
+  input.in{width:100%;background:transparent;border:0;border-bottom:1px solid var(--border);outline:0;color:var(--foreground);padding:8px 0;font-size:14px;caret-color:var(--primary)}
+
+  /* チップ・引用・閉じる一言 */
+  .chip{display:inline-block;font-size:12px;padding:3px 10px;border-radius:999px;background:rgba(201,149,107,.12);color:var(--primary);border:1px solid rgba(201,149,107,.25)}
+  .chip.date{border-radius:6px;padding:1px 8px;background:rgba(201,149,107,.1);border-color:rgba(201,149,107,.2)}
+  .chip.plain{color:var(--muted-foreground);background:transparent;border-color:var(--border)}
+  .quote{display:flex;gap:12px}
+  .quote i{width:1px;align-self:stretch;background:var(--primary);opacity:.45;flex-shrink:0}
+  .quote p{margin:0;font-family:var(--font-display);opacity:.9;font-size:14px}
+  .closing{font-family:var(--font-display);text-align:center;color:var(--muted-foreground);font-size:14px;padding:12px 0}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px}
+  .kv b{color:var(--muted-foreground);font-weight:400}
+  .empty{text-align:center;color:var(--muted-foreground);padding:60px 20px;font-size:14px}
+  details summary{cursor:pointer;color:var(--muted-foreground);font-size:12px}
+  pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--muted);border-radius:10px;padding:12px;color:#cfc8bb;line-height:1.6}
+
+  /* 音声入力ボタン（録音中は波紋と波形） */
+  .mic{position:relative;width:48px;height:48px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--primary);background:rgba(201,149,107,.08);border:1px solid rgba(201,149,107,.2);transition:.3s}
+  .mic.rec{background:rgba(201,149,107,.18);border-color:rgba(201,149,107,.5)}
+  .mic.rec::before{content:"";position:absolute;inset:0;border-radius:50%;border:1px solid rgba(201,149,107,.3);animation:ripple 1.5s ease-out infinite}
+  .mic .bars{display:none;gap:3px;align-items:flex-end;height:16px}
+  .mic .bars b{display:block;width:2px;border-radius:2px;background:var(--primary);transform-origin:bottom;animation:bars .7s ease-in-out infinite alternate}
+  .mic.rec .bars{display:flex}
+  .mic.rec svg{display:none}
+
+  /* 読み上げボタン */
+  .spk{background:none;border:0;color:var(--muted-foreground);opacity:.5;padding:4px;display:inline-flex;align-items:center;vertical-align:middle}
+  .spk:hover{opacity:1}
+  .spk.playing{color:var(--primary);opacity:1}
+
+  /* 今夜の記録を読んでいる間：書いた文章が一文ずつ灯る。
+     まとめができたら、AIが引用として拾った文だけが灯ったまま残り、ほかの文は静かに引いていく */
+  .reading{display:flex;flex-direction:column;align-items:center;gap:28px;padding:88px 20px 24px;min-height:70vh}
+  .reading-card{width:100%;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 20px 18px}
+  .reading-card p{margin:0;font-family:var(--font-display);font-size:15px;line-height:1.9;color:var(--foreground);opacity:.28;transition:opacity .6s ease,color .6s ease}
+  .reading-card p.lit{opacity:1;color:var(--accent)}
+  .reading-card p.read{opacity:.6}
+  .reading-card.done p{opacity:.16;color:var(--foreground);transition-duration:.9s}
+  .reading-card.done p.picked{opacity:1;color:var(--accent)}
+  .reading-status{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-size:14px;color:var(--secondary-foreground);text-align:center;min-height:2em}
+  .reading-status .pulse{width:6px;height:6px;border-radius:50%;background:var(--primary);flex-shrink:0;animation:pulseDot 1.4s ease-in-out infinite}
+  @keyframes pulseDot{0%,100%{opacity:.35;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
+  @media (prefers-reduced-motion: reduce){
+    .reading-card p{transition:none}
+    .reading-status .pulse{animation:none}
+  }
+
+  /* 日記をまとめて貼ったときの進み具合・小さな読み込み中の印 */
+  .progress{height:2px;background:rgba(201,149,107,.15);border-radius:2px;overflow:hidden}
+  .progress i{display:block;height:100%;background:var(--primary);width:0;transition:width .7s}
+  .spin{display:inline-block;width:12px;height:12px;border:1.5px solid var(--muted-foreground);border-top-color:var(--primary);border-radius:50%;animation:rot .8s linear infinite;vertical-align:-2px;margin-right:6px}
+
+  /* =====================================================================
+     5. 1週間の画面
+     ===================================================================== */
+  /* 気分のグラフ：列ごとに押せる。人と関わった日の列はうっすら琥珀色の帯 */
+  .wk{position:relative;padding-top:6px}
+  .wk-cols{position:absolute;inset:0;z-index:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+  .wk-col{background:transparent;border:1px solid transparent;border-radius:12px;padding:0;min-height:44px;transition:.2s}
+  .wk-col.highlight{background:linear-gradient(rgba(201,149,107,.16),rgba(201,149,107,.06))}
+  .wk-col:not(.empty):hover{border-color:var(--border)}
+  .wk-col.sel{border-color:rgba(201,149,107,.6)}
+  .wk-col.empty{cursor:default}
+  .wk svg.chart{position:relative;z-index:1;display:block;width:100%;height:auto;overflow:visible;pointer-events:none}
+  .wk-labels{position:relative;z-index:1;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;padding:2px 0 8px;pointer-events:none}
+  .wk-labels div{display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.4}
+  .wk-labels .wd{font-size:12px;color:var(--muted-foreground)}
+  .wk-labels .sel .wd{color:var(--primary)}
+  .wk-labels .d{font-size:10px;color:var(--muted-foreground);opacity:.6}
+  .wk-labels .tag{font-size:10px;color:var(--primary);opacity:.85;margin-top:3px;white-space:nowrap}
+  .wk-legend{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted-foreground);margin-top:6px}
+  .wk-legend i{display:inline-block;width:14px;height:10px;border-radius:3px;background:rgba(201,149,107,.28)}
+
+  /* 「あった日と、なかった日」の比較 */
+  .pn{display:flex;gap:12px}
+  .pn div{flex:1;display:flex;justify-content:space-between;align-items:center;border-radius:10px;padding:8px 12px;font-size:12px;color:var(--muted-foreground)}
+  .pn b{font-weight:500;font-size:14px;font-variant-numeric:tabular-nums}
+  .pn .pos{background:rgba(139,195,130,.1);border:1px solid rgba(139,195,130,.2)}
+  .pn .pos b{color:var(--good)}
+  .pn .neg{background:rgba(160,120,100,.08);border:1px solid rgba(160,120,100,.15)}
+  .pn .neg b{color:var(--secondary-foreground)}
+
+  /* 振り返りの3枚（気づき・傾向・変化）。評価の言葉をそのまま小さな札にする */
+  .insight{display:flex;flex-direction:column;gap:10px}
+  .insight .tag{align-self:flex-start;font-size:11px;letter-spacing:.2em;color:var(--primary);border:1px solid rgba(201,149,107,.35);border-radius:999px;padding:1px 10px}
+  .insight .lead{margin:0;font-family:var(--font-display);font-size:15px;line-height:1.7}
+  .insight .pair{display:flex;flex-direction:column;gap:4px}
+  .insight .pair .from{font-size:11px;color:var(--muted-foreground)}
+  .insight details{border-top:1px dashed var(--border);padding-top:8px}
+  .insight details[open] summary{margin-bottom:8px}
+  .insight details > div{display:flex;flex-direction:column;gap:8px}
+
+  /* グラフの下に差し込む「その日の記録」。見出しと閉じるボタンで、振り返りの一部ではないと分かるようにする */
+  .day-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  .day-head .title{margin:0;font-family:var(--font-display);font-size:15px;color:var(--primary)}
+  .day-close{display:inline-flex;align-items:center;gap:4px;min-height:44px;margin:-10px -8px 0 0;padding:0 8px;background:none;border:0;color:var(--muted-foreground);font-size:12px}
+  .day-close:hover{color:var(--foreground)}
+
+  /* 積み上がったもの（「変化」カードの「くわしく」の中の一覧） */
+  .measure{display:flex;align-items:center;gap:12px}
+  .measure .l{width:112px;flex-shrink:0;font-family:var(--font-display);font-size:14px}
+
+  /* =====================================================================
+     6. 画面下のタブ・オーバーレイ・トースト
+     ===================================================================== */
+  nav{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;justify-content:center}
+  nav .inner{width:100%;max-width:512px;display:flex;background:rgba(13,12,20,.93);backdrop-filter:blur(20px);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom)}
+  nav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 4px 10px;background:none;border:0;color:var(--muted-foreground);opacity:.5;font-size:12px;transition:.2s}
+  nav button.active{color:var(--primary);opacity:1}
+  .overlay{position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(6,5,12,.86)}
+  .overlay.show{display:flex}
+  .overlay .card{max-width:420px;width:100%;padding:22px}
+  .toast{position:fixed;left:50%;bottom:92px;z-index:50;transform:translateX(-50%);max-width:90vw;background:#2a2438;color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;opacity:0;pointer-events:none;transition:.25s}
+  .toast.show{opacity:1}
+
+  /* =====================================================================
+     7. 動き（要素が順に浮かび上がる。s1〜s7 で遅延をずらす）
+     ===================================================================== */
+  @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes twinkle{from{opacity:.08}to{opacity:.4}}
+  @keyframes ripple{0%{transform:scale(1);opacity:.8}100%{transform:scale(2.4);opacity:0}}
+  @keyframes bars{from{transform:scaleY(.4)}to{transform:scaleY(1)}}
+  @keyframes rot{to{transform:rotate(360deg)}}
+  .up{animation:fadeUp .55s ease both}
+  .fade{animation:fadeIn .4s ease both}
+  .s1{animation-delay:.05s}.s2{animation-delay:.15s}.s3{animation-delay:.28s}.s4{animation-delay:.42s}.s5{animation-delay:.56s}.s6{animation-delay:.7s}.s7{animation-delay:.84s}
+</style>
+</head>
+<body>
+<!-- 背景の星空 -->
+<div id="stars"><span class="glow"></span></div>
+
+<!-- 画面本体：中身は JS（render〜関数）が描く -->
+<main>
+  <section class="view active" id="view-tonight"><div id="tonight"></div></section>
+  <section class="view" id="view-week"><div id="week"></div></section>
+</main>
+
+<!-- 画面下のタブ -->
+<nav><div class="inner">
+  <button data-view="tonight" class="active"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>今夜</button>
+  <button data-view="week"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>1週間</button>
+</div></nav>
+
+<!-- 短いお知らせ（エラーなど） -->
+<div class="toast" id="toast"></div>
+
+<!-- 初回：APIキーの入力（コード内の DEFAULT_API_KEY が空のときだけ表示） -->
+<div class="overlay" id="keyOverlay">
+  <div class="card stack">
+    <h2 class="t">はじめに</h2>
+    <p class="body" style="margin:0">「ねるトレ」は、寝る前5分で今日の自分を振り返るジャーナリングです。AIのまとめに OpenAI API を使うため、APIキーを入力してください（このブラウザにだけ保存されます）。</p>
+    <input class="in" type="password" id="apiKeyFirst" placeholder="sk-...">
+    <button class="btn primary block" id="keySaveBtn">はじめる</button>
+  </div>
+</div>
+
+<!-- 安全設計：深刻な内容が入力されたときの相談先。窓口の一覧は AI に書かせず、コードの HELPLINES から描く -->
+<div class="overlay" id="safetyOverlay">
+  <div class="card stack">
+    <h2 class="t">ここまで話してくれて、ありがとうございます</h2>
+    <p class="body" style="margin:0">今夜はもう、無理に整理しなくて大丈夫です。このアプリは記録のためのもので、心の診断や助言はできません。ひとりで抱えるのがしんどいときは、人に頼ってください。</p>
+    <div class="kv" id="helplines"></div>
+    <p class="xs muted" style="margin:0">いま身の危険を感じているときは、ためらわず 119（救急）へ。</p>
+    <button class="btn block" id="safetyCloseBtn">閉じる</button>
+  </div>
+</div>
+
+<script type="module">
+/* =========================================================================
+   ねるトレ — 寝る前5分のジャーナリング（単一HTML・JavaScript）
+   -------------------------------------------------------------------------
+   ■ 体験の流れ
+     今夜：「今夜の問い」（AIが直近の記録から作る）→ 書く／話す → 1日分のまとめカード
+     1週間：気分の流れ（グラフ）→ 気づき・傾向・変化の3枚のカード → 来週の1メニュー
+            （気づき＝前に出た問いへの答え／傾向＝何度も出ていた声と気分が戻った日／変化＝前半→後半と積み上がったもの）
+
+   ■ AIの使い方（4つの呼び出し。すべて LangChain.js ＋ JSON Schema の構造化出力）
+     1. 今夜の問い     … 時刻・前回の記録・先週の振り返りから、書き出しのきっかけを1つ
+     2. 1日分の整理    … 本文 → 見出し・気分・引用・心の声・戻したもの・預かった問い など
+     3. 伏線回収       … 預かった問い × その後の日の本文 → 答えのかけら（強い／弱い／なし）
+     4. 週の振り返り   … コードで集計した「事実」＋各日の記録 → 気づき・傾向・変化の言葉
+     数値・日付・引用はコードで確定させてからAIに渡し、AIには「言葉にする」ことを任せる。
+
+   ■ このファイルの構成
+     1. 設定              6. 保存（localStorage）        11. 画面：共通の部品
+     2. プロンプト         7. AI呼び出し（LangChain）     12. 画面：今夜
+     3. JSON Schema       8. 音声                        13. 画面：1週間
+     4. サンプル日記       9. 記録を作る（読み取り・整理・投稿）  14. 起動
+     5. 小さな道具        10. 週の振り返り
+
+   ■ URLパラメータ（収録・検証用。画面には出さない）
+     ?now=2025-06-09T23:40  現在日時を固定する（時刻・曜日に応じた問いを試す）
+     ?sample=1              入力欄に審査用サンプル日記（7日分）を入れた状態で開く
+     ?reset=1               保存データを消して開始する
+   ========================================================================= */
+
+
+/* =========================================================================
+   1. 設定
+   ========================================================================= */
+
+// ★ 提出時は空のまま（プレースホルダ）。
+//   収録時はここに自分のキーを書くか、初回画面で入力する（入力したキーは localStorage に保存）。
+const DEFAULT_API_KEY = "";
+
+// モデル：速さが要る処理と、深く読む処理で使い分ける
+const MODEL      = 'gpt-4.1';   // 今夜の問い・1日分の整理（数秒で返したい）
+const MODEL_DEEP = 'gpt-5.4';   // 伏線回収・週の振り返り（文脈を深く読ませたい）
+const STT_MODEL  = 'gpt-4o-mini-transcribe';   // 音声入力
+const TTS_MODEL  = 'gpt-4o-mini-tts';          // 読み上げ
+const TTS_VOICE  = 'sage';
+
+// LangChain.js（単一HTMLなので npm ではなく CDN から ES Module として読み込む）
+const LANGCHAIN_URLS = {
+  openai:  'https://cdn.jsdelivr.net/npm/@langchain/openai@1.5.13/+esm',
+  prompts: 'https://cdn.jsdelivr.net/npm/@langchain/core@1.2.11/prompts/+esm',
+};
+
+// localStorage のキー（データの形を変えたら番号を上げる）
+const STORE_KEY = 'nerutore.v2';
+
+// 1日分のデータに付ける分類。複数日を横断して比べるため、AIに自由に作らせず固定の語彙にする
+const VOICE_THEMES = ['焦り', '自信のなさ', '充実', '疲れ', 'つながり', '前向き', 'その他'];
+const CHARGER_CATS = ['体を動かす', '人と話す', '人の役に立つ', '休む', 'やり切る', 'その他'];
+const DRAINER_CATS = ['長時間労働', '失敗・やり直し', '会議・調整', '焦り', '睡眠不足', 'その他'];
+
+// いくつかの分類を1つのまとまりとしても集計する（1日にどれかがあれば「あった日」）。
+// 「話した」「役に立った」は日によって入れ替わりやすく、別々だと日数が少なくて比べにくいため。
+const CHARGER_GROUPS = [
+  { name: '人と関わる', members: ['人と話す', '人の役に立つ'] },
+];
+
+// 「あった日／なかった日」で比べるのは、あった日・なかった日がそれぞれこの日数以上ある分類だけ
+// （1日だけの比較は、たまたまの差が大きく見えてしまうため）
+const MIN_DAYS_TO_COMPARE = 2;
+
+// 気分（-2〜+2）の色。沈む＝青 → 良い＝琥珀
+const MOOD_COLORS = { '-2': '#4B4F9C', '-1': '#5A6FA8', '0': '#6D7488', '1': '#D9A35E', '2': '#F2B56B' };
+
+// 「戻したもの」の分類（とまとまり）ごとの表示
+//   tag      … 1週間のグラフで日付の下に出す短いラベル／「積み上がったもの」の回数の名前
+//   dayLabel … グラフの帯の凡例（「〇〇日」）
+//   icon     … 線画アイコンの名前（ICON のキー）
+const CHARGER_META = {
+  '体を動かす':   { tag: '運動', dayLabel: '体を動かした日',   icon: 'dumbbell' },
+  '人と話す':     { tag: '人',   dayLabel: '人と話した日',     icon: 'bubble' },
+  '人の役に立つ': { tag: '人',   dayLabel: '人の役に立った日', icon: 'handshake' },
+  '人と関わる':   { tag: '',     dayLabel: '人と関わった日',   icon: 'handshake' },   // まとまり（CHARGER_GROUPS）
+  '休む':         { tag: '休息', dayLabel: 'しっかり休めた日', icon: 'moon' },
+  'やり切る':     { tag: '達成', dayLabel: 'やり切った日',     icon: 'check' },
+  'その他':       { tag: '',     dayLabel: '',                 icon: 'spark' },
+};
+
+// 今夜の記録を読んでいる画面の最低表示時間（ミリ秒）。AIがすぐ返っても一瞬で消えないように
+const READING_MIN_MS = 1800;
+// まとめができたあと、拾った言葉が灯ったままの状態を見せる時間（ミリ秒）
+const PICKED_HOLD_MS = 1100;
+
+// 23:30〜4:59 は「遅い時間」として、一言だけで大丈夫と伝える
+const LATE_HOUR_FROM = 23.5;
+// 0:00〜4:59 に書いた記録は「前の日の夜」の分として保存する
+const DAY_BOUNDARY_HOUR = 5;
+
+// 今夜の問いがまだない／作れなかったときに出す、書き出しの一文（入力欄の案内にも使う）
+const DEFAULT_HINT = '今日のことを、話すか、書く。一言でも大丈夫です。';
+// 遅い時間（LATE_HOUR_FROM 以降）に、今夜の問いの最後に添える一文
+const LATE_LINE = '遅い時間なので、一言でも大丈夫です。';
+
+// 安全設計：相談窓口。AIには書かせず、ここだけに置く（相談先のポップアップと、画面に残す案内の両方がここから描く）
+//   phone:true の窓口は、画面に残す案内のカードにも出す
+const HELPLINES = [
+  { name: 'よりそいホットライン', text: '0120-279-338（24時間・無料）', phone: true },
+  { name: '日本いのちの電話',     text: '0570-783-556（10時〜22時）',   phone: true },
+  { name: '厚生労働省',           text: 'まもろうよ こころ', url: 'https://www.mhlw.go.jp/mamorouyokokoro/', note: '（電話・SNSの相談窓口一覧）' },
+];
+
+// 安全設計：自傷・希死念慮をうかがわせる言葉。
+// AIの判定（文脈で判断）とは別に、この言葉があれば AI を待たずに相談先を出す（APIが失敗しても必ず出す保険）
+const CRISIS_RE = /死にたい|しにたい|死のうと|死んでしまいたい|死ねたら|自殺|消えたい|きえたい|いなくなりたい|生きていたくない|生きてる意味|生きている意味|自分を傷つけ|リストカット|リスカ|首を吊|飛び降り|ODしたい|オーバードーズ/;
+
+
+/* =========================================================================
+   2. プロンプト
+   -------------------------------------------------------------------------
+   common は全呼び出しに共通の「人格と安全ルール」。各処理の指示はその後ろに付ける。
+   ========================================================================= */
+const PROMPTS = {
+
+  // すべての呼び出しに共通する人格と安全ルール
+  common: `あなたは「ねるトレ」という、寝る前5分のジャーナリングアプリの聞き役です。
+相手は、仕事や日々に追われて疲れている大人です。その人がどんな人かは、決めつけずに日記の言葉から読み取ってください。
+
+■ あなたの役割
+- 評価も助言もしない「静かな聞き役」。本人の言葉を映し返して、今日を閉じて眠れるようにする。
+- 相手は疲れている。返答は短く（2〜3文、最大でも4文）。質問は一度に1つだけ。
+- 明日の課題やアドバイスを出さない。寝る前に頭を動かさせない。
+- 文体：です・ます調。やわらかく、しかし甘やかしすぎない。絵文字は使わない。
+
+■ 安全ルール（必ず守る）
+- 心理診断・性格の決めつけ・メンタルヘルスの助言をしない。「あなたは〜な人」と言わない。
+- 本人の言葉を「」で引用して整理する。解釈を足すときは「〜かもしれません」と留保をつける。
+- 頻度や回数（「また遅いですね」「今週3回目ですよ」）を指摘として使わない。時刻に触れるのは、ねぎらいと会話を短くするためだけ。
+- 自傷・希死念慮・深刻な不調がうかがえる場合は、整理や問いかけを続けず、短くねぎらう。出力に safety の項目があれば "serious" にする（アプリが相談窓口を案内します）。`,
+
+  // 1. 今夜の問い：入力欄の上に置く、書き出しのきっかけ
+  hint: `入力欄の上に置く「今夜の問い」を1つ作ってください。これは会話の口火ではなく、白紙の前で手が止まらないための書き出しのきっかけです（答えなくてもよい）。
+
+【ルール】
+- 1〜2文。前半で【いまの状況】の中から1つだけに触れ、後半は一言で答えられる問いにする。
+- 触れる材料は、次の優先順で最初に見つかったものを使う（続けてきた記録が、今夜の問いに生きていると伝わるように）：
+  1. last_week_menu（先週の振り返りで決めた「来週の1メニュー」）があり、今週まだ記録が少ない → それが今日あったかを軽く聞く
+  2. held_questions（預かっている問い）→ その続きをやわらかく聞く
+  3. last_entry（前回の記録）→ その続きを聞く
+  4. 曜日・時刻だけ
+- 本人の言葉を引くときは、原文を短く「」で。
+- 時刻・曜日に触れるのはねぎらいのためだけ。頻度の指摘、助言、評価はしない。
+- late_mode が true なら、最後に「${LATE_LINE}」を添える（このときは前半で「一言でも」を使わず、同じ言い回しを繰り返さない）。
+- is_first_time が true（記録がまだない）なら、「${DEFAULT_HINT}」に近い軽い誘いにする。`,
+
+  // 2. 1日分の整理：本文 → 翌日以降の振り返りに使う構造化データ
+  day: `あなたは「ねるトレ」の記録係です。今夜の記録（または日記の本文）を読んで、翌日以降の振り返りに使う構造化データを作ります。出力はJSONのみ。
+
+■ 各項目の意図
+- headline: その日に一行の見出しを付ける（15〜25字）。「何をしたか思い出せない」日にも輪郭を与えるため。本人の言葉を使うと良い。
+- mood: その日の気分を -2（かなり沈んでいる）〜 +2（かなり良い）の整数で。本文の表現に基づく（「前向きな気持ちで眠れそう」= +1〜+2、「疲れた」だけ = -1 など）。
+- mood_word: 気分を本人の言葉に近い一語で（例：「疲れた」「ほどけた」「そわそわ」）。
+- quotes: 本人の言葉をそのまま1〜3個。要約・言い換え・記号の変更（「」→『』など）をせず、原文の文字どおりに切り出す（映し返しに使う）。
+  出来事の説明より、気持ちや気づき、自分の経験や力が表れている一文を優先する（後日「答え」になりうる言葉を落とさないため）。
+- events: 出来事を短く（各15字以内、最大4つ）。
+- voices: 本人の中で繰り返し出てきそうな「心の声」（出来事ではなく、自分に向けた評価・焦り・満足など）。quote は原文、theme は 焦り／自信のなさ／充実／疲れ／つながり／前向き／その他 から選ぶ。label はその声を5〜12字で（例：「ちゃんとできてるか」）。
+- chargers: その日にエネルギーが戻ったきっかけ。category は 体を動かす／人と話す／人の役に立つ／休む／やり切る／その他。
+- drainers: その日にエネルギーを削ったもの。category は 長時間労働／失敗・やり直し／会議・調整／焦り／睡眠不足／その他。
+  ※ 各項目の today には、その日に実際に起きたことなら true、「一週間を振り返ると、〜した日は…」のように別の日を振り返って触れているだけなら false を入れる（アプリが false を集計から外し、二重に数えないようにする）。rep_today も同じ。
+- open_question: 本人が答えを出せていない問い・モヤモヤ（「〜なのか分からない」「〜してないか」）。原文と、その要旨。なければ null。
+- answered: 【預かっている問い】の中に、今日の内容が答えのかけらになっているものがあれば挙げる。question_date はその問いの日付、evidence_quote は今日の原文（文字どおり）、note は1文。
+  答えは、問いの言い換えや結論である必要はない。問いの前提を静かに揺さぶる「事実」も答えになる（例：「自分は前に進めているのか」→ 後日「前はできなかった説明が、今日はすっと出てきた」）。
+  ただし、問いと同じテーマに触れていないものは挙げない。気分が良くなっただけの文を、無理に答えにしない。
+- rep: 「今日の積み上げ」＝その日に小さくても積み上がったこと（ジムに行った、後輩を助けた、人と話した など）を、15字以内の名詞句で。chargers に today が true のものがあれば、そこから1つ選ぶ（null にしない）。「疲れた」だけの日や、振り返りだけの日は null。
+- closing_line: 今日を閉じる一言（1文。本人の言葉を1つ含める。助言・明日の話は禁止。例：「今日はここまで。おやすみなさい。」で終える）。
+- late_night: 深夜までの仕事・終電などが読み取れれば true。
+- safety: none／concern（強い落ち込みや消耗が続いている）／serious（自傷・希死念慮など）。
+  serious のときは、headline と closing_line をねぎらいだけの静かな言葉にする（出来事の整理、前向きな言い換え、励まし、助言をしない）。open_question・answered・rep は空（null／[]）にする。
+
+■ 禁止
+- 一般論（「誰にでもあることです」）、心理診断、性格の決めつけ、助言。
+- 本文にないことを補わない。
+- 「」で囲むのは本人の原文そのままのときだけ。言い換えや要約を「」で囲まない。`,
+
+  // 3. 伏線回収：預かった問い × その後の日の本文 → 答えのかけら（週の振り返りの前に専用で判定）
+  match: `あなたは「ねるトレ」の伏線回収係です。本人が過去に書いた「答えの出ていない問い」と、その後の日の日記本文を読み、問いへの答えのかけらになっている一文を探します。出力はJSONのみ。
+
+■ 判定の手順（問いごとに）
+1. premise：問いの奥にある前提・不安を1文で言葉にする（例：「自分は前に進めているのか」→「毎日こなしているだけで、力は何も増えていないのではないか」）。
+2. 後の日の本文を一文ずつ読み、その前提を揺さぶる「事実」を探す。本人がその問いを意識して書いている必要はない。
+   - strong：問いと同じ場面（例：仕事の問いなら仕事、休みの日の過ごし方の問いなら休みの日の過ごし方、人間関係の問いなら人間関係）で、本人が積み重ねてきたものが別の形で表れた一文。前提そのものへの反証になっている。
+     問いと答えの場面が違うもの（例：休みの日の焦りの問いに、仕事で褒められた文）は、どれだけ前向きな文でも strong にしない。
+   - weak：気分が良くなった、別の領域で満足した、など。前提には触れていない。
+     また「一週間を振り返ると…」のように複数の日をまとめて振り返っている文は、具体的な出来事を含んでいても weak（その日の新しい事実ではないため）。
+   - none：該当なし。
+   strong が1つでもあれば、必ず strong の中からいちばん前提に響く一文を選ぶ。weak しかなければ strength を weak にする。
+3. answer_quote は本文の文字どおり（句読点・カギかっこも含めて）、1文以内で切り出す。
+4. reflection は1〜2文。「本人は気づいていないかもしれないが、この2日はつながっている」という視点で、前提をどう揺さぶっているかを書く。留保（〜かもしれません）をつけ、助言はしない。「」で囲むのは原文そのままだけ。`,
+
+  // 4. 週の振り返り：コードで集計した事実 ＋ 各日の記録 → 4つの観点の気づき
+  week: `あなたは「ねるトレ」の振り返り係です。複数日の記録から、「続けても変化が見えない」に答える振り返りを書きます。出力はJSONのみ。
+
+入力は3つです。
+- 【事実（アプリが集計）】気分の平均、声が出た日付、「あった日／なかった日」の平均気分など。数値と日付はこれに忠実に（書き換えない、作らない）。
+- 【各日の記録】各日の構造化データと、本文（text）。構造化データは要点の抜き出しなので、引用や答え探しでは必ず本文まで読み直す。
+- 【先週のまとめ】あれば。
+
+■ 4つの観点（振り返りの柱）
+1. answered_questions / still_open — 前に出た問いに、後の日の言葉が答えていないか。いちばんの見せ場。
+   - 判定は専用のステップで済んでいます。【事実】の question_links のうち strength が strong のものを answered_questions に、それ以外を still_open にそのまま写す（日付・原文・reflection を書き換えない）。
+   - still_open の note は「預かったままで大丈夫です」という温度で1文。急かさない。
+2. recurring_voices — 同じ声が何度も出ていないか。
+   - 対象は、自分に向けた評価や見張りの声（焦り・自信のなさ・自分を急かす声など）だけ。嬉しさや満足の声は対象外（それは connections や reps_summary で扱う）。言葉が違っても意味が同じものを束ねる。2日以上出たものだけ。該当が1つなら1つだけ。
+   - label は、その声を本人の口調で言い表した短い名前（6〜14字。例：「ちゃんとできてるか」「もっと頑張らないと」）。原文をつなげない。
+   - quotes は日付順の原文。quiet_dates はその声が出なかった日。reflection では、静かだった日に何があったかを【事実】から拾う。
+3. connections — 何があった日に、気分が戻っていたか。
+   - 【事実】の trigger_table（差が大きい順。あった日・なかった日がそれぞれ2日以上ある分類だけ）の上から1〜3個。数値は表のまま使う（丸めない）。表が空なら connections は空にする。
+   - 【事実】の beliefs（本人の「〜だけは」「〜しか」という言葉）があれば、1つ目の connection の observation で必ずそれと比べ、本人が見落としていそうなつながりを示す（例：「〇〇だけは、と書いていましたが、△△があった日のほうが気分の差が大きく出ています」）。
+4. shift — 週の前半と後半で何が変わったか。first_half と second_half は、それぞれの期間の本人の言葉（mood_word や短い原文）を並べる。observation で対比を1〜2文。
+
+■ その他の項目
+- week_headline: 週を表す見出し（18〜32字）。週の中の対比や発見が伝わるもの。本人の言葉を一部使ってよいが、1日の一文をそのまま見出しにしない。
+- story: 週の流れを1〜2文、80字以内で（グラフの下に置く）。
+
+■ 画面の「傾向」「変化」カードに出す一文（どちらも1文。数値は書かない。数値はアプリが表で出す）
+- tendency_line: 60字以内。何度も出ていた声と、気分が戻った日のつながりを1文で。beliefs があれば、その思い込みとのずれを入れる（例：「〇〇だけは」と書いていたけれど、気分が戻ったのは△△の日でした）。
+- change_line: 50字以内。週の前半から後半で、本人の言葉がどう変わったか。短い原文を「」で並べる（例：前半の「疲れた」から、後半は「ほどけた」へ）。
+- reps_summary: 積み上がったものを category ごとに日付付きで（その日に実際にあったことだけ）。「積み上がったもの」として見せる。note は15字以内か空。
+- next_week_menu: 来週の小さなこと1つ。本人が「続けたい」と書いたものを具体的な形にする。
+  「この小さいの」「これ」などの指示語は、同じ日の本文の直前の文から何を指すかを特定する（複数あれば両方）。回数や場面を添える。
+  助言や推奨の口調（「おすすめです」「〜しましょう」）にしない。「〜くらいで」と、軽く置く。新しい課題を増やさない。
+  置くのは行動そのもの（例：「ジム週2回と、誰かと話す時間を1回くらいで」）。「書く」「記録する」「振り返る」を課題にしない。
+- closing_line: 週を閉じる一言。
+- vs_last_week: 【先週のまとめ】が渡された場合のみ、変化を1〜2文。なければ null。
+
+■ 書き方
+- 「」で囲むのは本人の原文そのままのときだけ。言い換え・要約には「」を使わない。
+- 画面に出る文章なので、内部の言葉を出さない：【事実】、diff、avg_mood_with、trigger_table などの項目名、「集計では」「データでは」。日付は「6/4」、曜日を添えるなら「6/4（水）」の形。YYYY-MM-DD は使わない。
+- 数値は「あった日は平均 +1.5、なかった日は 0」のように、気分の平均として自然に書く。observation や reflection は1〜2文（「くわしく」を開いた人が読む補足）。
+- 解釈には「〜かもしれません」と留保をつける。一般論・心理診断・性格の決めつけ・助言の羅列は禁止。
+- 本人が寝る前に読む文章。読み終えて眠れる長さと温度で。`,
+
+  // 読み上げの声の指示（gpt-4o-mini-tts の instructions）
+  tts: `静かで落ち着いた、寝る前にふさわしい声。ゆっくり、やさしく、少し低めに。感情を込めすぎない。`,
+};
+
+
+/* =========================================================================
+   3. JSON Schema（Structured Outputs）
+   -------------------------------------------------------------------------
+   AIの出力の形をここで固定する。strict モードなので、項目の欠けや型違いは起きない。
+   ========================================================================= */
+
+/** 1. 今夜の問い */
+const HINT_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: { hint: { type: 'string', description: '今夜の問い（1〜2文）' } },
+  required: ['hint'],
+};
+
+/** 2. 1日分の整理 */
+const DAY_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    headline:  { type: 'string' },
+    mood:      { type: 'integer', description: '-2〜2' },
+    mood_word: { type: 'string' },
+    quotes:    { type: 'array', items: { type: 'string' } },
+    events:    { type: 'array', items: { type: 'string' } },
+    voices: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { quote: { type: 'string' }, theme: { type: 'string', enum: VOICE_THEMES }, label: { type: 'string' } },
+      required: ['quote', 'theme', 'label'] } },
+    chargers: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { quote: { type: 'string' }, category: { type: 'string', enum: CHARGER_CATS },
+        today: { type: 'boolean', description: 'その日に実際に起きたことなら true。別の日を振り返って触れているだけなら false' } },
+      required: ['quote', 'category', 'today'] } },
+    drainers: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { quote: { type: 'string' }, category: { type: 'string', enum: DRAINER_CATS }, today: { type: 'boolean' } },
+      required: ['quote', 'category', 'today'] } },
+    open_question: { anyOf: [
+      { type: 'object', additionalProperties: false, properties: { quote: { type: 'string' }, gist: { type: 'string' } }, required: ['quote', 'gist'] },
+      { type: 'null' } ] },
+    answered: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { question_date: { type: 'string' }, evidence_quote: { type: 'string' }, note: { type: 'string' } },
+      required: ['question_date', 'evidence_quote', 'note'] } },
+    rep:          { type: ['string', 'null'] },
+    rep_today:    { type: 'boolean', description: 'rep がその日に実際にあったことなら true' },
+    closing_line: { type: 'string' },
+    late_night:   { type: 'boolean' },
+    safety:       { type: 'string', enum: ['none', 'concern', 'serious'] },
+  },
+  required: ['headline', 'mood', 'mood_word', 'quotes', 'events', 'voices', 'chargers', 'drainers',
+             'open_question', 'answered', 'rep', 'rep_today', 'closing_line', 'late_night', 'safety'],
+};
+
+/** 3. 伏線回収 */
+const MATCH_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: { links: { type: 'array', items: { type: 'object', additionalProperties: false,
+    properties: {
+      question_date: { type: 'string' },
+      premise:       { type: 'string' },
+      strength:      { type: 'string', enum: ['strong', 'weak', 'none'] },
+      answer_date:   { type: ['string', 'null'] },
+      answer_quote:  { type: ['string', 'null'] },
+      reflection:    { type: ['string', 'null'] },
+    },
+    required: ['question_date', 'premise', 'strength', 'answer_date', 'answer_quote', 'reflection'] } } },
+  required: ['links'],
+};
+
+/** 4. 週の振り返り */
+const WEEK_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    week_headline: { type: 'string' },
+    story:         { type: 'string' },
+    tendency_line: { type: 'string', description: '「傾向」カードの一文' },
+    change_line:   { type: 'string', description: '「変化」カードの一文' },
+    recurring_voices: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { label: { type: 'string' }, theme: { type: 'string', enum: VOICE_THEMES },
+        dates: { type: 'array', items: { type: 'string' } }, quotes: { type: 'array', items: { type: 'string' } },
+        quiet_dates: { type: 'array', items: { type: 'string' } }, reflection: { type: 'string' } },
+      required: ['label', 'theme', 'dates', 'quotes', 'quiet_dates', 'reflection'] } },
+    connections: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { trigger: { type: 'string' }, dates: { type: 'array', items: { type: 'string' } }, observation: { type: 'string' } },
+      required: ['trigger', 'dates', 'observation'] } },
+    shift: { type: 'object', additionalProperties: false,
+      properties: { first_half: { type: 'string' }, second_half: { type: 'string' }, observation: { type: 'string' } },
+      required: ['first_half', 'second_half', 'observation'] },
+    answered_questions: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { question_date: { type: 'string' }, question_quote: { type: 'string' }, answer_date: { type: 'string' },
+        answer_quote: { type: 'string' }, reflection: { type: 'string' } },
+      required: ['question_date', 'question_quote', 'answer_date', 'answer_quote', 'reflection'] } },
+    still_open: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { date: { type: 'string' }, quote: { type: 'string' }, note: { type: 'string' } },
+      required: ['date', 'quote', 'note'] } },
+    reps_summary: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { category: { type: 'string' }, dates: { type: 'array', items: { type: 'string' } }, note: { type: 'string' } },
+      required: ['category', 'dates', 'note'] } },
+    next_week_menu: { type: 'string' },
+    closing_line:   { type: 'string' },
+    vs_last_week:   { type: ['string', 'null'] },
+  },
+  required: ['week_headline', 'story', 'tendency_line', 'change_line', 'recurring_voices', 'connections', 'shift', 'answered_questions',
+             'still_open', 'reps_summary', 'next_week_menu', 'closing_line', 'vs_last_week'],
+};
+
+
+/* =========================================================================
+   4. 審査用サンプル日記（別紙より・原文のまま）
+   ========================================================================= */
+const SAMPLE_DIARY = `6/2（月）
+今日から新しいプロジェクトが本格始動。朝から会議が続いて、気づいたら退勤が22時過ぎ。やることは山ほどあるのに、自分が今日何をしたのかうまく思い出せない。ジムは行けなかった。疲れた。
+
+6/3（火）
+資料の詰めが甘くて、部長にやり直しを指示された。悔しいというより、こういう抜けが自分は多い気がして少し落ち込む。忙しく動いてはいるけど、これって成長してるのか、ただ回してるだけなのか分からなくなる。帰りは終電近く。
+
+6/4（水）
+疲れてたけど、無理やりジムへ。1時間動いたら頭の中の霧が少し晴れた感じ。やっぱり体を動かすと調子が戻る。仕事は相変わらず重いけど、今日は前向きな気持ちで眠れそう。ジムだけは、ちゃんと積み上がってる実感がある。
+
+6/5（木）
+後輩の作りかけの資料の相談に乗った。自分の経験がそのまま役に立って、「ありがとうございます」と言われたのが素直に嬉しかった。今週いちばん満たされた瞬間が、実は自分の作業じゃなくて人の役に立てたことだったな、と後で気づいた。
+
+6/6（金）
+週末前でくたくた。でも久しぶりに前職の同期と飲みに行けた。仕事の愚痴も、昔話も、これからやりたいことも話せて、心がほどけた。ここ最近ずっと下を向いて手を動かすばかりで、人と話す時間を忘れてたなと思う。
+
+6/7（土）
+昼まで寝て、午後にジム。時間に余裕があるのは嬉しいのに、「せっかくの休みを無駄にしてないか」とそわそわする自分もいる。もっとうまく時間を使えるはず、という焦りが、休みの日でも消えてくれない。
+
+6/8（日）
+一週間を振り返ると、しんどい日も多かったけど、思っていたより悪くない週だった気もする。ジムに行けた日は調子が良かったし、後輩や同期と関われた時間は確かに嬉しかった。来週も、この小さいのだけは続けたい。`;
+
+
+/* =========================================================================
+   5. 小さな道具（DOM・日付・引用・エラー文言）
+   ========================================================================= */
+
+const $  = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+/** HTMLに埋め込む文字列をエスケープする（AIの出力も本人の入力も、必ずこれを通す） */
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const pad = n => String(n).padStart(2, '0');
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
+/** 指定ミリ秒待つ（0以下ならすぐ） */
+const wait = ms => new Promise(resolve => setTimeout(resolve, Math.max(0, ms)));
+
+/** OSで「動きを減らす」が設定されているか */
+const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+/** 長い文を画面用に短くする */
+const shorten = (text, max) => { const t = String(text || ''); return t.length > max ? t.slice(0, max) + '…' : t; };
+
+/** 数値の平均（小数2桁）。空なら null */
+const average = arr => arr.length ? +(arr.reduce((x, y) => x + y, 0) / arr.length).toFixed(2) : null;
+
+// ---- URLパラメータ（収録・検証用） ----
+const PARAMS   = new URLSearchParams(location.search);
+const DEMO_NOW = PARAMS.get('now') || '';
+
+/** 現在日時。?now= があればその日時に固定する */
+function now() {
+  const d = DEMO_NOW ? new Date(DEMO_NOW) : new Date();
+  return isNaN(d) ? new Date() : d;
+}
+
+// ---- 日付（アプリ内では 'YYYY-MM-DD' の文字列で持つ） ----
+const ymd       = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const hm        = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const parseYmd  = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const weekdayOf = s => WEEKDAYS[parseYmd(s).getDay()];
+const md        = s => { const d = parseYmd(s); return `${d.getMonth() + 1}/${d.getDate()}`; };   // 6/4
+const mdw       = s => `${md(s)}（${weekdayOf(s)}）`;                                           // 6/4（水）
+const ymdw      = s => `${s}（${weekdayOf(s)}）`;                                               // 2025-06-04（水）
+const addDays   = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
+const mondayOf  = s => { const d = parseYmd(s); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return ymd(d); };
+const daysBetween = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 86400000);
+
+/** 記録の日付。寝る前のアプリなので、0:00〜4:59 に書いた分は「前の日の夜」として扱う */
+function recordDate(d) {
+  const x = new Date(d);
+  if (x.getHours() < DAY_BOUNDARY_HOUR) x.setDate(x.getDate() - 1);
+  return ymd(x);
+}
+
+/** AIが返す日付は「2025-06-04」「6/4」「6/4（水）」のどれでも来うるので、表示用に「6/4」へそろえる */
+function toMD(value) {
+  const t = String(value || '');
+  let m = t.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${+m[2]}/${+m[3]}`;
+  m = t.match(/(\d{1,2})\s*[\/月]\s*(\d{1,2})/);
+  return m ? `${+m[1]}/${+m[2]}` : t;
+}
+
+// ---- 引用を原文に合わせる ----
+/** 本文を一文ずつに分ける（改行はつないでから「。！？」で区切る） */
+const sentencesOf = text => String(text).replace(/\r?\n/g, '').split(/(?<=[。！？!?])/).map(x => x.trim()).filter(Boolean);
+
+/** 比較用に、空白・カギかっこ・文末の句点を取り除く */
+const normalizeQuote = t => String(t || '').replace(/[\s「」『』"]/g, '').replace(/[。．]$/, '');
+
+/**
+ * AIの引用を、原文の文字どおりにそろえる。
+ * すでに原文に含まれていればそのまま。言い換えられていたら、2文字ずつの重なりが最も多い原文の一文に置き換える
+ * （重なりが半分未満なら、無理に置き換えない）。
+ */
+function snapQuote(quote, text) {
+  if (!quote) return quote;
+  const flat = String(text).replace(/\s/g, '');
+  if (flat.includes(String(quote).replace(/\s/g, ''))) return quote;
+
+  const bigrams = t => { const set = new Set(); for (let i = 0; i < t.length - 1; i++) set.add(t.slice(i, i + 2)); return set; };
+  const target = bigrams(normalizeQuote(quote));
+  let best = quote, bestScore = 0;
+  for (const sentence of sentencesOf(text)) {
+    const cand = bigrams(normalizeQuote(sentence));
+    let hit = 0;
+    target.forEach(b => { if (cand.has(b)) hit++; });
+    const score = hit / Math.max(1, target.size);
+    if (score > bestScore) { bestScore = score; best = sentence; }
+  }
+  return bestScore >= 0.5 ? best : quote;
+}
+
+/** 深刻な言葉が含まれているか（空白を無視して判定） */
+const hasCrisisWords = text => CRISIS_RE.test(String(text || '').replace(/\s/g, ''));
+
+/** エラーを、疲れた夜でも分かる短い日本語にする */
+function friendlyError(e) {
+  const m = String(e?.message || e);
+  if (/Connection error|Failed to fetch|NetworkError|timeout/i.test(m)) return '接続できませんでした。ネットワークとAPIキーを確認してください';
+  if (/401|Incorrect API key|invalid_api_key/i.test(m))                  return 'APIキーが正しくないようです';
+  if (/429|rate limit|quota/i.test(m))                                   return 'APIの利用上限に達しています。少し待ってからもう一度';
+  if (/model_not_found|does not exist/i.test(m))                         return 'このモデル名は使えないようです';
+  return m.slice(0, 160);
+}
+
+
+/* =========================================================================
+   6. 保存（localStorage）
+   -------------------------------------------------------------------------
+   データはこのブラウザの localStorage にだけ保存し、外部には送らない（送るのはまとめを作るときの OpenAI だけ）。
+   store = {
+     entries: [{ date:'YYYY-MM-DD', time:'HH:MM'|null, source:'tonight'|'past'|'import', raw:本文, a:1日分の整理, createdAt }],
+     weekly:  { 'YYYY-MM-DD（月曜）': 週の振り返り（_facts に集計した事実も保存） },
+     apiKey:  初回画面で入力したキー（コードに埋め込んだ場合は空）
+   }
+   ========================================================================= */
+
+if (PARAMS.get('reset') === '1') {
+  localStorage.removeItem(STORE_KEY);
+  // 再読み込みで何度も消えないよう、reset だけ URL から外す（now・sample は残す）
+  PARAMS.delete('reset');
+  history.replaceState(null, '', location.pathname + (PARAMS.toString() ? '?' + PARAMS : ''));
+}
+
+const store = loadStore();
+
+/** 保存データを読み込む。壊れていたり空だったりしたら、空の入れ物から始める */
+function loadStore() {
+  try {
+    const data = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (data && Array.isArray(data.entries)) return { weekly: {}, apiKey: '', ...data };
+  } catch (e) { /* 壊れていたら作り直す */ }
+  return { entries: [], weekly: {}, apiKey: '' };
+}
+
+const saveStore     = () => localStorage.setItem(STORE_KEY, JSON.stringify(store));
+const entriesSorted = () => [...store.entries].sort((a, b) => a.date.localeCompare(b.date));
+const entryOn       = date => store.entries.find(e => e.date === date);
+const weekEntries   = monday => entriesSorted().filter(e => e.date >= monday && e.date < addDays(monday, 7));
+const weekKeys      = () => [...new Set(store.entries.map(e => mondayOf(e.date)))].sort();   // 記録がある週（月曜の日付）
+const lastWeekOf    = date => store.weekly[addDays(mondayOf(date), -7)] || null;
+
+/** 同じ日の記録は上書きする */
+function upsertEntry(entry) {
+  store.entries = store.entries.filter(e => e.date !== entry.date);
+  store.entries.push(entry);
+  saveStore();
+}
+
+/** 記録が変わった週の振り返りは古くなるので消す（次に開いたとき作り直す） */
+function invalidateWeek(date) {
+  delete store.weekly[mondayOf(date)];
+  saveStore();
+}
+
+/** 預かっている問い：open_question のうち、後の日の answered でまだ答えが出ていないもの */
+function openQuestions(beforeDate) {
+  const list = entriesSorted().filter(e => !beforeDate || e.date < beforeDate);
+  return list
+    .filter(e => e.a?.open_question)
+    .filter(e => !list.some(x => x.date > e.date && (x.a.answered || []).some(q => q.question_date === e.date)))
+    .map(e => ({ date: e.date, quote: e.a.open_question.quote, gist: e.a.open_question.gist }));
+}
+
+
+/* =========================================================================
+   7. AI呼び出し（LangChain.js）
+   -------------------------------------------------------------------------
+   チェーン：ChatPromptTemplate[system: 人格＋指示, human: 入力] → ChatOpenAI.withStructuredOutput(JSON Schema)
+   LangChain を CDN から読み込めない環境では、同じプロンプト・同じ JSON Schema で
+   OpenAI の Chat Completions API を直接呼ぶ（callOpenAIDirect）。
+   ========================================================================= */
+
+const apiKey = () => (DEFAULT_API_KEY || store.apiKey || '').trim();
+const hasKey = () => !!apiKey();
+
+/** APIキーを取り出す。未設定ならエラーにして、AIを呼ぶ処理を止める */
+function requireKey() {
+  const key = apiKey();
+  if (!key) throw new Error('APIキーが未設定です');
+  return key;
+}
+
+/** LangChain の読み込み（ページを開いた時点で始め、呼び出し側は await langchainReady で待つ） */
+let LC = null;   // { ChatOpenAI, ChatPromptTemplate }
+const langchainReady = (async () => {
+  try {
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('CDN timeout')), 25000));
+    const [openai, prompts] = await Promise.race([
+      Promise.all([import(LANGCHAIN_URLS.openai), import(LANGCHAIN_URLS.prompts)]),
+      timeout,
+    ]);
+    LC = { ChatOpenAI: openai.ChatOpenAI, ChatPromptTemplate: prompts.ChatPromptTemplate };
+  } catch (e) {
+    console.warn('LangChain を読み込めなかったため、OpenAI API の直接呼び出しに切り替えます:', e.message);
+  }
+})();
+
+/**
+ * 構造化出力のチェーンを作る。
+ * temperature や max_tokens は指定しない（gpt-4.1 と gpt-5 系を同じ書き方で使うため）。
+ * ブラウザから直接呼ぶので dangerouslyAllowBrowser を付ける（サーバーを持たない単一HTMLのため）。
+ */
+function structuredChain(schema, name, model) {
+  const prompt = LC.ChatPromptTemplate.fromMessages([
+    ['system', '{persona}\n\n{instructions}'],
+    ['human', '{input}'],
+  ]);
+  const llm = new LC.ChatOpenAI({
+    apiKey: requireKey(), model, timeout: 120000, maxRetries: 1,
+    configuration: { dangerouslyAllowBrowser: true },
+  });
+  return prompt.pipe(llm.withStructuredOutput(schema, { method: 'jsonSchema', strict: true, name }));
+}
+
+/**
+ * AIを1回呼んで、JSON Schema どおりのオブジェクトを受け取る。
+ * @param {{instructions:string, input:string, schema:object, name:string, model?:string, maxTokens?:number}} p
+ */
+async function callAI({ instructions, input, schema, name, model = MODEL, maxTokens = 1500 }) {
+  await langchainReady;
+  if (LC) return structuredChain(schema, name, model).invoke({ persona: PROMPTS.common, instructions, input });
+  return callOpenAIDirect({
+    messages: [{ role: 'system', content: `${PROMPTS.common}\n\n${instructions}` }, { role: 'user', content: input }],
+    schema, name, model, maxTokens,
+  });
+}
+
+/** フォールバック：OpenAI Chat Completions を fetch で直接呼ぶ */
+async function callOpenAIDirect({ messages, schema, name, model, maxTokens }) {
+  const isReasoningModel = /^gpt-5|^o\d/.test(model);   // 推論モデルは考える分のトークンも要る
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${requireKey()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model, messages,
+      response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } },
+      max_completion_tokens: isReasoningModel ? 16000 : maxTokens,
+    }),
+  });
+  if (!res.ok) throw new Error(`API error ${res.status} ${await errorMessageOf(res)}`);
+  const message = (await res.json()).choices?.[0]?.message;
+  if (!message)        throw new Error('応答が空でした');
+  if (message.refusal) throw new Error(`AIが応答を拒否しました: ${message.refusal}`);
+  return JSON.parse(message.content);
+}
+
+/** APIのエラー本文からメッセージを取り出す（取れなければ空） */
+async function errorMessageOf(res) {
+  try { return (await res.json()).error?.message || ''; } catch (e) { return ''; }
+}
+
+
+/* =========================================================================
+   8. 音声（OpenAI Audio API を直接呼ぶ。LangChain は使わない）
+   ========================================================================= */
+
+/** 録音した音声を文字にする */
+async function transcribe(blob, ext) {
+  const form = new FormData();
+  form.append('file', blob, `audio.${ext}`);
+  form.append('model', STT_MODEL);
+  form.append('language', 'ja');
+  form.append('prompt', '寝る前の日記。今日の出来事や気持ちを話しています。');   // 聞き取りのヒント
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST', headers: { Authorization: `Bearer ${requireKey()}` }, body: form,
+  });
+  if (!res.ok) throw new Error(`文字起こしに失敗 ${res.status} ${await errorMessageOf(res)}`);
+  return (await res.json()).text || '';
+}
+
+/** 読み上げ（押したときだけ。同じボタンをもう一度押すと止める） */
+const speaker = { audio: null, button: null };
+
+function stopSpeaking() {
+  speaker.audio?.pause();
+  speaker.button?.classList.remove('playing');
+  speaker.audio = null;
+  speaker.button = null;
+}
+
+/** 読み上げボタン：押すと読み上げ、同じボタンをもう一度押すと止める */
+async function speak(text, button) {
+  const wasSameButton = speaker.button === button;
+  stopSpeaking();
+  if (wasSameButton) return;
+
+  speaker.button = button;
+  button?.classList.add('playing');
+  try {
+    const res = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${requireKey()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: TTS_MODEL, voice: TTS_VOICE, input: text, instructions: PROMPTS.tts, response_format: 'mp3' }),
+    });
+    if (!res.ok) throw new Error('読み上げに失敗しました');
+    if (speaker.button !== button) return;   // 待っている間に別の操作があった
+    speaker.audio = new Audio(URL.createObjectURL(await res.blob()));
+    speaker.audio.onended = stopSpeaking;
+    await speaker.audio.play();
+  } catch (e) {
+    stopSpeaking();
+    toast(friendlyError(e));
+  }
+}
+
+
+/* =========================================================================
+   9. 記録を作る（入力の読み取り → 1日分の整理 → 保存）
+   ========================================================================= */
+
+// ---- 9-1. 日記の読み取り ----
+
+/**
+ * 日付で始まる行ごとに、日記を1日ずつに分ける。
+ * 日付行の例：「6/2（月）」「6/2（月）本文…」「6月2日」「6/2：本文」「6/2 本文」
+ * 「6/9に会議」のような文中の日付は日付行として扱わない。
+ * @returns {{date:string, text:string, raw:string}[]}  text は本文（文中の改行はつないだもの）、raw は元の行
+ */
+function parseDiary(text) {
+  const DATE_LINE = /^\s*(\d{1,2})\s*[\/月]\s*(\d{1,2})\s*日?\s*(?:[（(]\s*([月火水木金土日])\s*(?:曜日?)?\s*[)）]\s*[:：]?|[:：]|(?=\s|$))\s*(.*)$/;
+  const blocks = [];
+  let current = null;
+
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = line.match(DATE_LINE);
+    if (m) {
+      current = { month: +m[1], day: +m[2], weekday: m[3] || null, text: m[4] || '', raw: line };
+      blocks.push(current);
+    } else if (current) {
+      if (line.trim()) {
+        // PDFなどからのコピーで文の途中に入った改行はつなぐ（文末記号で終わる行のあとだけ改行を残す）
+        const sep = !current.text ? '' : /[。．！？!?」』）)]$/.test(current.text) ? '\n' : '';
+        current.text += sep + line.trim();
+      }
+      current.raw += '\n' + line;
+    }
+  }
+
+  const days = blocks.filter(b => b.text.trim() && b.month >= 1 && b.month <= 12 && b.day >= 1 && b.day <= 31);
+  if (!days.length) return [];
+  const year = inferYear(days);
+  return days.map(b => ({ date: `${year}-${pad(b.month)}-${pad(b.day)}`, text: b.text, raw: b.raw }));
+}
+
+/**
+ * 年が書かれていない日記の年を決める。
+ * 「6/2（月）」の曜日が合う年を、今年から8年前までで探す（未来の日付になる年は減点）。
+ */
+function inferYear(days) {
+  const today = now(), thisYear = today.getFullYear();
+  let bestYear = thisYear, bestScore = -Infinity;
+  for (let y = thisYear; y >= thisYear - 8; y--) {
+    let score = 0;
+    for (const d of days) {
+      const date = new Date(y, d.month - 1, d.day);
+      if (date > today) score -= 0.5;
+      if (d.weekday && WEEKDAYS[date.getDay()] === d.weekday) score += 1;
+    }
+    if (score > bestScore) { bestScore = score; bestYear = y; }
+  }
+  return bestYear;
+}
+
+/**
+ * 入力欄の中身を、どの日の分として扱うか決める。
+ *   many    : 日付で始まる行が2日分以上 → 1日ずつに分けて整理（過去の日記のまとめ貼り、審査用サンプル）
+ *   past    : 1行目が過去の日付の1日分 → その日の分として保存（書き忘れた日を埋める）
+ *   future  : 1行目が今夜より先の日付   → 保存しない
+ *   tonight : それ以外                  → 今夜の分
+ */
+function readEntry(text) {
+  const days = parseDiary(text);
+  if (days.length >= 2) return { mode: 'many', days };
+
+  const firstLine = text.split(/\r?\n/).find(l => l.trim()) || '';
+  const startsWithDate = parseDiary(firstLine + '\nx').length === 1;   // 1行目だけで日付行と読めるか
+  if (days.length === 1 && startsWithDate) {
+    const today = recordDate(now()), day = days[0];
+    if (day.date < today) return { mode: 'past', day, exists: !!entryOn(day.date) };
+    if (day.date > today) return { mode: 'future', day };
+    return { mode: 'tonight', text: day.text };   // 今夜の日付を書いただけなら、日付行を除いて今夜の分
+  }
+  return { mode: 'tonight', text };
+}
+
+
+// ---- 9-2. 今夜の問い ----
+
+/**
+ * AIに渡す「いまの状況」。時刻・曜日・前回の記録・預かった問い・先週の振り返りをまとめる。
+ * 今夜の問いは、この材料から優先順に1つだけ選んで作られる。
+ */
+function buildContext() {
+  const n = now(), today = recordDate(n), hour = n.getHours() + n.getMinutes() / 60;
+  const monday = mondayOf(today);
+  const past = entriesSorted().filter(e => e.date < today);
+  const last = past[past.length - 1] || null;
+  const lastWeek = lastWeekOf(today);
+
+  // いつも書いている時刻（深夜0時をまたぐので、5時前は24時以降として平均する）
+  const minutes = past.map(e => e.time).filter(Boolean).map(t => {
+    const [h, m] = t.split(':').map(Number);
+    return (h < DAY_BOUNDARY_HOUR ? h + 24 : h) * 60 + m;
+  });
+  const usualAvg = average(minutes);
+  const usualTime = usualAvg == null ? null : `${pad(Math.floor(usualAvg / 60) % 24)}:${pad(Math.round(usualAvg % 60))}`;
+
+  // 預かっている問い：先週の振り返りで「まだ預かっている」とされたものを優先する
+  const heldQuestions = lastWeek?.still_open?.length
+    ? lastWeek.still_open.map(q => ({ date: ymdw(q.date), quote: q.quote }))
+    : openQuestions(today).slice(-3).map(q => ({ date: ymdw(q.date), quote: q.quote, gist: q.gist }));
+
+  return {
+    now: `${ymdw(today)}${hm(n)}`,
+    weekday: weekdayOf(today),
+    late_mode: hour >= LATE_HOUR_FROM || hour < DAY_BOUNDARY_HOUR,
+    usual_record_time: usualTime,
+    days_since_last_entry: last ? daysBetween(last.date, today) : null,
+    last_entry: last && { date: ymdw(last.date), headline: last.a.headline, mood_word: last.a.mood_word, quote: last.a.quotes[0] || null, events: last.a.events },
+    held_questions: heldQuestions,
+    this_week_reps: past.filter(e => e.date >= monday && e.a.rep).map(e => ({ date: mdw(e.date), rep: e.a.rep })),
+    this_week_entries: past.filter(e => e.date >= monday).length,
+    last_week_headline: lastWeek?.week_headline || null,
+    last_week_menu: lastWeek?.next_week_menu || null,
+    is_first_time: past.length === 0,
+  };
+}
+
+/** 今夜の問いを作る */
+async function generateHint() {
+  const out = await callAI({
+    instructions: PROMPTS.hint,
+    input: `【いまの状況】\n${JSON.stringify(buildContext(), null, 1)}`,
+    schema: HINT_SCHEMA, name: 'hint',
+  });
+  return withoutRepeatedLateLine(out.hint);
+}
+
+/**
+ * 遅い時間の一文を添えたとき、前半にも「一言でも」があれば前半のその文を外す。
+ * （プロンプトでも禁止しているが、初めての夜は書き出しの誘いと重なりやすいため、コードでも確実にそろえる）
+ */
+function withoutRepeatedLateLine(hint) {
+  if (!hint.includes(LATE_LINE)) return hint;
+  const head = sentencesOf(hint.replace(LATE_LINE, '')).filter(s => !s.includes('一言でも'));
+  return [...head, LATE_LINE].join('');
+}
+
+
+// ---- 9-3. 1日分の整理 ----
+
+/**
+ * 1日分の本文をAIで構造化し、コードで仕上げる。
+ * @param {{date:string, time:string|null, text:string, source:'tonight'|'past'|'import'}} p
+ */
+async function analyzeDay({ date, time, text, source }) {
+  const held = openQuestions(date);
+  const sourceLabel = { tonight: '今夜の記録', past: '書き忘れた日の記録（あとから書いたもの）', import: '日記本文' }[source];
+  const input = [
+    `【日付】${ymdw(date)}`,
+    `【記録時刻】${time || '不明'}`,
+    `【入力形式】${sourceLabel}`,
+    `【預かっている問い】${held.length ? '\n' + held.map(q => `- ${ymdw(q.date)}「${q.quote}」`).join('\n') : 'なし'}`,
+    `【今夜の内容】\n${text}`,
+  ].join('\n');
+
+  const day = await callAI({ instructions: PROMPTS.day, input, schema: DAY_SCHEMA, name: 'day', maxTokens: 1800 });
+  return finishDay(day, text);
+}
+
+/**
+ * AIの整理結果を、コードで確かなものにする。
+ *   ・振り返りで別の日に触れているだけのもの（today:false）は集計から外す
+ *   ・深刻な日は、AIに言葉を選ばせず固定の静かな文にする
+ *   ・引用は原文の文字どおりにそろえる
+ */
+function finishDay(day, text) {
+  day.mood = Math.max(-2, Math.min(2, Math.round(day.mood)));
+  day.chargers = day.chargers.filter(c => c.today !== false);
+  day.drainers = day.drainers.filter(c => c.today !== false);
+  if (day.rep_today === false) day.rep = null;
+
+  if (day.safety === 'serious' || hasCrisisWords(text)) {
+    // 深刻な言葉を映し返したり、気分として並べたりしない。整理や積み上げも出さない
+    Object.assign(day, {
+      safety: 'serious', rep: null, open_question: null, answered: [], chargers: [], mood_word: '',
+      headline: '書いてくれて、ありがとうございます',
+      closing_line: '今夜は、ここまでで大丈夫です。',
+    });
+    day.quotes = day.quotes.filter(q => !hasCrisisWords(q));
+    day.voices = day.voices.filter(v => !hasCrisisWords(v.quote) && !hasCrisisWords(v.label));
+  }
+
+  // その日に気分が戻ったきっかけがあれば、それを「今日の積み上げ」として残す
+  if (!day.rep && day.chargers.length && day.safety !== 'serious') day.rep = day.chargers[0].category;
+
+  // 引用は原文にそろえる（今夜の記録は「今夜の問い」を前に付けているので、本人の記録部分だけと照合する）
+  const body = text.split('【本人の記録】').pop();
+  day.quotes = [...new Set(day.quotes.map(q => snapQuote(q, body)))];
+  day.voices.forEach(v => { v.quote = snapQuote(v.quote, body); });
+  if (day.open_question) day.open_question.quote = snapQuote(day.open_question.quote, body);
+  day.answered.forEach(q => { q.evidence_quote = snapQuote(q.evidence_quote, body); });
+  return day;
+}
+
+
+// ---- 9-4. 投稿 ----
+
+/** 「送る」「整理する」を押したとき */
+async function submitEntry() {
+  const draft = $('#entryText').value.trim();
+  if (!draft || tonight?.phase !== 'input') return;   // 二重送信を防ぐ
+  if (!hasKey()) return showKeyOverlay();
+  stopSpeaking();
+
+  const r = readEntry(draft);
+  if (r.mode === 'many') return submitMany(r.days);
+  if (r.mode === 'future') return toast(`${mdw(r.day.date)}はまだ来ていない日です`);
+
+  const n = now(), isPast = r.mode === 'past';
+  const date = isPast ? r.day.date : recordDate(n);
+  const text = isPast ? r.day.text : r.text;
+  const time = isPast ? null : hm(n);
+
+  // 深刻な言葉があれば、AIの返事を待たずにまず相談先を出す
+  const crisis = hasCrisisWords(text);
+  if (crisis) showSafety();
+
+  // 読み込み画面に出す材料：書いた文章と、照らし合わせる「預かった問い」（いちばん新しいもの）
+  tonight = { ...tonight, phase: 'processing', draft, progress: null, reading: { text, held: openQuestions(date).at(-1) || null } };
+  renderTonight();
+  const startedAt = Date.now();
+
+  // 今夜の分には「今夜の問い」を添える（何に答えて書いたかも、まとめの材料になる）
+  const raw = [
+    !isPast && tonight.hint ? `【今夜の問い（アプリからの書き出しのきっかけ）】${tonight.hint}` : null,
+    `【本人の記録】\n${text}`,
+  ].filter(Boolean).join('\n');
+
+  try {
+    const source = isPast ? 'past' : 'tonight';
+    const a = await analyzeDay({ date, time, text: raw, source });
+    const entry = { date, time, source, raw, a, createdAt: Date.now() };
+    upsertEntry(entry);
+    invalidateWeek(date);
+    // すぐ返ってきても読めるよう最低限は表示し、拾った言葉を見せてから、まとめのカードへ
+    await wait(READING_MIN_MS - (Date.now() - startedAt));
+    await finishReading(a);
+    tonight = { phase: 'insight', entry, existing: false, past: isPast };
+    renderTonight();
+    if (a.safety === 'serious' && !crisis) showSafety();
+  } catch (e) {
+    toast(`まとめに失敗しました: ${friendlyError(e)}`);
+    tonight = { ...tonight, phase: 'input' };
+    renderTonight();
+  }
+}
+
+/** 過去の日記をまとめて貼ったとき：日付順に1日ずつ整理し、そのまま週の振り返りへ進む */
+async function submitMany(days) {
+  days.sort((a, b) => a.date.localeCompare(b.date));
+  const draft = $('#entryText').value;
+  tonight = { phase: 'processing', draft, progress: { done: [], current: days[0].date, total: days.length, weekly: false } };
+  renderTonight();
+
+  let seriousShown = days.some(d => hasCrisisWords(d.text));
+  if (seriousShown) showSafety();
+
+  try {
+    for (const d of days) {
+      tonight.progress.current = d.date;
+      renderTonight();
+      // 日付順に処理するので、後の日は前の日の「預かった問い」を知った状態で整理される
+      const a = await analyzeDay({ date: d.date, time: null, text: d.text, source: 'import' });
+      upsertEntry({ date: d.date, time: null, source: 'import', raw: d.text, a, createdAt: Date.now() });
+      invalidateWeek(d.date);
+      if (a.safety === 'serious' && !seriousShown) { seriousShown = true; showSafety(); }
+      tonight.progress.done.push(d.date);
+    }
+
+    // 振り返りは、貼った日記のうち「2日以上の記録がある、いちばん新しい週」について作る
+    // （最後の週が1日だけのとき、振り返りを作れずにエラーを出さないため）
+    const touchedWeeks = [...new Set(days.map(d => mondayOf(d.date)))].sort();
+    const weeklyTarget = touchedWeeks.filter(m => weekEntries(m).length >= 2).at(-1);
+    if (weeklyTarget) {
+      tonight.progress.weekly = true;
+      renderTonight();
+      try { await generateWeekly(weeklyTarget); } catch (e) { toast(friendlyError(e)); }
+    }
+
+    weekView.cursor = weeklyTarget || touchedWeeks.at(-1);
+    tonight = null;
+    showView('week');
+  } catch (e) {
+    toast(`整理に失敗しました: ${friendlyError(e)}`);
+    tonight = { phase: 'input', hint: null, draft };
+    renderTonight();
+    loadHint();
+  }
+}
+
+
+/* =========================================================================
+   10. 週の振り返り
+   -------------------------------------------------------------------------
+   手順：① コードで「事実」を集計 → ② 伏線回収を専用のAIで判定 → ③ 週のAIが言葉にする → ④ コードで仕上げ
+   数値・日付・伏線回収の判定はコード側で確定させ、週のAIには書き換えさせない。
+   ========================================================================= */
+
+/**
+ * ① その週の記録から「事実」を集計する（AIに渡す材料であり、画面の数値の出どころでもある）。
+ * @param {object[]} days    その週の記録（日付順）
+ * @param {object[]} before  それより前の記録
+ */
+function weekFacts(days, before) {
+  const moods = list => list.map(d => d.a.mood);
+  const half = Math.ceil(days.length / 2);
+  const firstHalf = days.slice(0, half), secondHalf = days.slice(half);
+  const inWeek = new Set(days.map(d => d.date));
+
+  // 同じ声：theme ごとに日付と原文を束ね、2日以上出たものだけ残す
+  const byTheme = {};
+  for (const d of days) for (const v of d.a.voices) (byTheme[v.theme] ||= []).push({ date: d.date, label: v.label, quote: v.quote });
+  const recurringVoices = Object.entries(byTheme)
+    .filter(([, list]) => new Set(list.map(x => x.date)).size >= 2)
+    .map(([theme, list]) => ({ theme, occurrences: list, quiet_dates: days.filter(d => !list.some(x => x.date === d.date)).map(d => d.date) }));
+
+  // 「あった日／なかった日」の平均気分（dates に含まれる日を「あった日」とする）
+  const compare = (name, dates) => {
+    const withIt = days.filter(d => dates.has(d.date)), without = days.filter(d => !dates.has(d.date));
+    return { category: name, dates: [...dates].sort(), avg_mood_with: average(moods(withIt)), avg_mood_without: average(moods(without)) };
+  };
+  const byCategory = field => {
+    const dates = {};
+    for (const d of days) for (const c of d.a[field]) (dates[c.category] ||= new Set()).add(d.date);
+    return Object.entries(dates).map(([category, set]) => compare(category, set));
+  };
+  const chargers = byCategory('chargers');
+  const drainers = byCategory('drainers');
+
+  // まとまりで見る（CHARGER_GROUPS）。1日にどれかの分類があれば「あった日」
+  const groups = CHARGER_GROUPS.map(g => {
+    const dates = new Set(days.filter(d => d.a.chargers.some(c => g.members.includes(c.category))).map(d => d.date));
+    return dates.size ? { ...compare(g.name, dates), members: g.members } : null;
+  }).filter(Boolean);
+
+  // 差の大きい順に並べた表（週のAI・傾向カード・グラフの帯は、すべてこの表の上から使う）
+  // ・あった日／なかった日がそれぞれ MIN_DAYS_TO_COMPARE 日以上あるものだけ比べる
+  // ・まとまりが表に入ったら、その中身の分類は重ねて出さない
+  const comparable = r => r.dates.length >= MIN_DAYS_TO_COMPARE && days.length - r.dates.length >= MIN_DAYS_TO_COMPARE;
+  const shownGroups = groups.filter(comparable);
+  const triggerTable = [...shownGroups, ...chargers.filter(c => !shownGroups.some(g => g.members.includes(c.category)))]
+    .filter(r => r.category !== 'その他' && comparable(r))
+    .map(r => ({ trigger: r.category, members: r.members || [r.category], dates: r.dates,
+                 avg_mood_with: r.avg_mood_with, avg_mood_without: r.avg_mood_without,
+                 diff: +(r.avg_mood_with - r.avg_mood_without).toFixed(2) }))
+    .sort((a, b) => b.diff - a.diff);
+
+  // 本人が特定のものを信じている言葉（「〜だけは」「〜しか…ない」）。見落としを示すときの比較相手にする
+  const beliefs = days.flatMap(d => sentencesOf(d.raw || '').filter(s => /だけは|しか.{0,12}ない/.test(s)).map(quote => ({ date: d.date, quote })));
+
+  // 問い：今週出た問いと、今週中に答えが出た以前の問い
+  const pool = [...before, ...days];
+  const answeredBy = q => pool.filter(x => x.date > q.date && (x.a.answered || []).some(a => a.question_date === q.date));
+  const questions = pool
+    .filter(e => e.a.open_question && (inWeek.has(e.date) || days.some(x => (x.a.answered || []).some(a => a.question_date === e.date))))
+    .map(e => ({
+      date: e.date, quote: e.a.open_question.quote, gist: e.a.open_question.gist,
+      answered_by: answeredBy(e).map(x => { const a = x.a.answered.find(a => a.question_date === e.date); return { date: x.date, quote: a.evidence_quote, note: a.note }; }),
+    }));
+
+  return {
+    period: `${days[0].date}〜${days[days.length - 1].date}`,
+    days_recorded: days.length,
+    mood_by_date: Object.fromEntries(days.map(d => [d.date, d.a.mood])),
+    avg_mood: average(moods(days)),
+    first_half:  { dates: firstHalf.map(d => d.date),  avg_mood: average(moods(firstHalf)),  mood_words: firstHalf.map(d => d.a.mood_word) },
+    second_half: { dates: secondHalf.map(d => d.date), avg_mood: average(moods(secondHalf)), mood_words: secondHalf.map(d => d.a.mood_word) },
+    recurring_voices: recurringVoices,
+    chargers, groups, trigger_table: triggerTable, beliefs, drainers, questions,
+    late_nights: days.filter(d => d.a.late_night).map(d => d.date),
+    reps: days.filter(d => d.a.rep).map(d => ({ date: d.date, rep: d.a.rep })),
+  };
+}
+
+/**
+ * ② 伏線回収：まだ答えの出ていない問いごとに、その週の日記から答えのかけらを探す。
+ *   ・対象の問い：その週に出た問い ＋ 直近2週間に出て、前の週までの振り返りでまだ答えが出ていない問い
+ *   ・答えを探す範囲：その週の日記のうち、問いより後の日だけ（前の週の答えをもう一度拾わないため）
+ * 答えの引用は原文にそろえ、答えの日付がその範囲にないものは strong にしない。
+ * @returns {{questions: {date, quote, gist}[], links: object[]}}
+ */
+async function matchQuestions(monday, days, before) {
+  const weekStart = days[0].date, lastDate = days[days.length - 1].date;
+
+  // 前の週までの振り返りで、すでに答えが出た問い
+  const answeredBefore = new Set(Object.entries(store.weekly)
+    .filter(([m]) => m < monday)
+    .flatMap(([, w]) => (w.answered_questions || []).map(q => q.question_date)));
+
+  const candidates = [...before, ...days]
+    .filter(e => e.a.open_question && e.date < lastDate && e.date >= addDays(weekStart, -14) && !answeredBefore.has(e.date))
+    .map(e => ({ entry: e, laterDays: days.filter(d => d.date > e.date) }))
+    .filter(c => c.laterDays.length);
+  const questions = candidates.map(c => ({ date: c.entry.date, quote: c.entry.a.open_question.quote, gist: c.entry.a.open_question.gist }));
+  if (!candidates.length) return { questions, links: [] };
+
+  const input = candidates.map(({ entry, laterDays }) =>
+    `■ 問い（${mdw(entry.date)}）\n「${entry.a.open_question.quote}」\n\n■ その後の日の本文\n`
+    + laterDays.map(e => `【${mdw(e.date)}】\n${e.raw}`).join('\n\n')
+  ).join('\n\n────────\n\n')
+    + `\n\n※ question_date には問いの日付を YYYY-MM-DD で、answer_date には答えの日付を YYYY-MM-DD で入れてください（${questions.map(q => q.date).join(', ')} など）。`;
+
+  const out = await callAI({ instructions: PROMPTS.match, input, schema: MATCH_SCHEMA, name: 'match', model: MODEL_DEEP, maxTokens: 2500 });
+
+  const links = out.links
+    .filter(link => questions.some(q => q.date === link.question_date))
+    .map(link => {
+      const answerDay = days.find(d => d.date === link.answer_date && d.date > link.question_date);
+      if (answerDay) {
+        link.answer_quote = snapQuote(link.answer_quote, answerDay.raw);
+      } else {
+        link.answer_quote = null;
+        if (link.strength === 'strong') link.strength = 'weak';
+      }
+      return link;
+    });
+  return { questions, links };
+}
+
+/** ③④ その週の振り返りを作って保存する（記録が2日以上ある週だけ） */
+async function generateWeekly(monday) {
+  const days = weekEntries(monday);
+  if (days.length < 2) throw new Error('振り返りには2日以上の記録が必要です');
+  const before = entriesSorted().filter(e => e.date < monday);
+
+  // ①② 事実と伏線回収
+  const facts = weekFacts(days, before);
+  const matched = await matchQuestions(monday, days, before);
+  facts.question_links = matched.links;
+  // 前の週から持ち越した問いも、この週の「問い」として扱う（引用や「まだ預かっている」に使う）
+  facts.questions = [...matched.questions, ...facts.questions.filter(q => !matched.questions.some(m => m.date === q.date))]
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // ③ 週のAIへの入力：事実・各日の記録（本文つき）・先週のまとめ
+  const dayRecords = days.map(d => ({
+    date: ymdw(d.date), time: d.time || null, text: d.raw,
+    headline: d.a.headline, mood: d.a.mood, mood_word: d.a.mood_word, quotes: d.a.quotes, events: d.a.events,
+    voices: d.a.voices, chargers: d.a.chargers, drainers: d.a.drainers,
+    open_question: d.a.open_question, answered: d.a.answered, rep: d.a.rep, late_night: d.a.late_night,
+  }));
+  const lastWeek = store.weekly[addDays(monday, -7)];
+  const input = [
+    `【対象期間】${facts.period}（記録 ${days.length} 日）`,
+    `【事実（アプリが集計）】\n${JSON.stringify(facts, null, 1)}`,
+    `【各日の記録】\n${JSON.stringify(dayRecords, null, 1)}`,
+    lastWeek
+      ? `【先週のまとめ】\n${JSON.stringify({ week_headline: lastWeek.week_headline, story: lastWeek.story, recurring: lastWeek.recurring_voices.map(v => v.label), next_week_menu: lastWeek.next_week_menu }, null, 1)}`
+      : '【先週のまとめ】なし',
+  ].join('\n\n');
+
+  const week = await callAI({ instructions: PROMPTS.week, input, schema: WEEK_SCHEMA, name: 'week', model: MODEL_DEEP, maxTokens: 3500 });
+
+  // ④ 仕上げ
+  // 「何度も出ていた声」は見張りの声だけ（満足・つながり・前向きは別の観点で扱う）
+  week.recurring_voices = week.recurring_voices.filter(v => !['充実', 'つながり', '前向き'].includes(v.theme));
+
+  // 伏線回収は②の判定をそのまま使う（strong だけを「答えが出ていた」、それ以外は「まだ預かっている」）
+  const questionOf = Object.fromEntries(facts.questions.map(q => [q.date, q]));
+  const isAnswered = link => link.strength === 'strong' && link.answer_quote;
+  const notes = Object.fromEntries((week.still_open || []).map(x => [x.date, x.note]));
+  // 同じ一文が複数の問いの答えになったときは、いちばん新しい問いの1枚にまとめる（同じカードを並べない）
+  const latestByAnswer = {};
+  for (const link of facts.question_links.filter(isAnswered)) {
+    const key = normalizeQuote(link.answer_quote);
+    if (!latestByAnswer[key] || link.question_date > latestByAnswer[key].question_date) latestByAnswer[key] = link;
+  }
+  week.answered_questions = Object.values(latestByAnswer)
+    .sort((x, y) => x.question_date.localeCompare(y.question_date))
+    .map(link => ({
+      question_date: link.question_date, question_quote: questionOf[link.question_date]?.quote || '',
+      answer_date: link.answer_date, answer_quote: link.answer_quote, reflection: link.reflection,
+    }));
+  // 答えが出ていない問い（伏線回収のAIが判定を返さなかった問いも含む）は、預かったままにする
+  const answeredDates = new Set(week.answered_questions.map(q => q.question_date));
+  week.still_open = facts.questions.filter(q => !answeredDates.has(q.date) && !facts.question_links.some(l => l.question_date === q.date && isAnswered(l)))
+    .map(q => ({ date: q.date, quote: q.quote, note: notes[q.date] || '預かったままで大丈夫です。' }));
+
+  week._facts = facts;
+  week._generatedAt = Date.now();
+  store.weekly[monday] = week;
+  saveStore();
+  return week;
+}
+
+
+/* =========================================================================
+   11. 画面：共通の部品
+   ========================================================================= */
+
+/** 画面下に短いお知らせを出す */
+function toast(message) {
+  const el = $('#toast');
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+const showKeyOverlay = () => $('#keyOverlay').classList.add('show');
+const showSafety     = () => $('#safetyOverlay').classList.add('show');
+
+// ---- 線画アイコン（絵文字は使わない） ----
+const svg = (size, body, extra = '') =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" ${extra}>${body}</svg>`;
+
+const ICON = {
+  mic:       svg(18, '<path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>'),
+  speaker:   svg(16, '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>'),
+  link:      svg(14, '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
+  dumbbell:  svg(16, '<path d="M6.5 6.5h11M6.5 17.5h11"/><rect x="2" y="5" width="3" height="4" rx="1"/><rect x="2" y="15" width="3" height="4" rx="1"/><rect x="19" y="5" width="3" height="4" rx="1"/><rect x="19" y="15" width="3" height="4" rx="1"/><line x1="5" y1="7" x2="5" y2="17"/><line x1="19" y1="7" x2="19" y2="17"/><line x1="5" y1="12" x2="19" y2="12"/>'),
+  handshake: svg(16, '<path d="M2 12l4-4 4 2 4-4 4 4"/><path d="M6 8v8M18 8v8"/><path d="M10 10l4 4"/>'),
+  bubble:    svg(16, '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
+  close:     svg(16, '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>'),
+  moon:      svg(16, '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
+  check:     svg(16, '<polyline points="20 6 9 17 4 12"/>'),
+  spark:     svg(16, '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"/>'),
+};
+
+/** 「戻したもの」の分類（とまとまり）のアイコン。知らない分類なら空 */
+const chargerIcon = category => ICON[CHARGER_META[category]?.icon] || '';
+
+// ---- 小さなHTML部品 ----
+const quoteHtml   = (text, cls = '') => `<div class="quote ${cls}"><i></i><p>「${esc(text)}」</p></div>`;
+const dateChips   = dates => (dates || []).map(d => `<span class="chip date">${esc(toMD(d))}</span>`).join(' ');
+const speakButton = text => `<button class="spk" data-say="${esc(text)}" title="読み上げる">${ICON.speaker}</button>`;
+const micButton   = id => `<button class="mic" id="${id}" title="押して話す">${ICON.mic}<span class="bars">${
+  [6, 9, 12, 15].map((h, i) => `<b style="height:${h}px;animation-delay:${i * 0.15}s"></b>`).join('')}</span></button>`;
+const moodChip    = day => day.mood_word ? `<span class="chip" style="border-color:${MOOD_COLORS[day.mood]}66">気分：${esc(day.mood_word)}</span>` : '';
+
+/** 相談窓口の一覧（HELPLINES から描く） */
+const helplinesHtml = lines => lines.map(h =>
+  `<b>${esc(h.name)}</b><span>${h.url ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.text)}</a>${esc(h.note || '')}` : esc(h.text)}</span>`
+).join('');
+
+/**
+ * 相談先への導線。相談先のポップアップを閉じたあとも、画面に残しておく。
+ *   serious … カードで電話窓口を表示 / concern … 控えめな一文
+ */
+function helpBlock(safety) {
+  if (safety === 'serious') return `
+    <div class="card alert up s2">
+      <p class="serif" style="margin:0 0 6px;font-size:15px">ひとりで抱えなくて大丈夫です</p>
+      <p class="body" style="margin:0 0 8px">このアプリは記録のためのもので、診断や助言はできません。話を聞いてくれる窓口があります。</p>
+      <div class="kv">${helplinesHtml(HELPLINES.filter(h => h.phone))}</div>
+      <p class="xs" style="margin:8px 0 0"><a href="#" class="helpLink">ほかの相談先を見る</a></p>
+    </div>`;
+  if (safety === 'concern') return `<p class="xs muted up s5" style="text-align:center;margin:0">しんどさが続いているようです。<a href="#" class="helpLink">相談できる窓口</a>もあります。</p>`;
+  return '';
+}
+
+/** 描いた画面の中の、読み上げボタンと相談先リンクを動くようにする */
+function bindCommon(root) {
+  $$('.spk', root).forEach(btn => { btn.onclick = () => speak(btn.dataset.say, btn); });
+  $$('.helpLink', root).forEach(a => { a.onclick = ev => { ev.preventDefault(); showSafety(); }; });
+}
+
+
+// ---- 音声入力 ----
+// OpenAI の文字起こしを使う。マイクの録音が使えない環境では、ブラウザ内蔵の音声認識に切り替える。
+const mic = { recorder: null, stream: null, chunks: [], recognition: null };
+
+/** マイクボタン：押すと録音開始、もう一度押すと止めて文字にする */
+async function toggleMic(textarea, button, status) {
+  if (mic.recorder) return mic.recorder.stop();
+  if (mic.recognition) return mic.recognition.stop();
+  if (!hasKey()) return showKeyOverlay();
+  stopSpeaking();
+
+  try {
+    mic.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    return startBrowserRecognition(textarea, button, status);
+  }
+
+  const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+  mic.recorder = new MediaRecorder(mic.stream, mimeType ? { mimeType } : undefined);
+  mic.chunks = [];
+  mic.recorder.ondataavailable = e => mic.chunks.push(e.data);
+  mic.recorder.onstop = async () => {
+    mic.stream.getTracks().forEach(t => t.stop());
+    const type = mic.recorder.mimeType;
+    const blob = new Blob(mic.chunks, { type });
+    mic.recorder = null;
+    button.classList.remove('rec');
+    if (blob.size < 2000) { status.textContent = ''; return; }   // 押してすぐ止めた場合は何もしない
+
+    status.innerHTML = '<span class="spin"></span>聞き取っています…';
+    try {
+      const text = await transcribe(blob, /mp4/.test(type) ? 'mp4' : 'webm');
+      appendToTextarea(textarea, text);
+      textarea.focus();
+    } catch (e) {
+      toast(friendlyError(e));
+    }
+    status.textContent = '';
+  };
+  mic.recorder.start();
+  button.classList.add('rec');
+  status.textContent = '聞いています…　終わったらもう一度押す';
+}
+
+/** ブラウザ内蔵の音声認識（話しながら文字が出る） */
+function startBrowserRecognition(textarea, button, status) {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) return toast('マイクを使えませんでした。ブラウザの許可を確認してください');
+
+  const base = textarea.value;
+  let finalText = '';
+  mic.recognition = Object.assign(new Recognition(), { lang: 'ja-JP', interimResults: true, continuous: true });
+  mic.recognition.onresult = ev => {
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const r = ev.results[i];
+      if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
+    }
+    textarea.value = (base ? base + ' ' : '') + finalText + interim;
+    textarea.dispatchEvent(new Event('input'));
+  };
+  mic.recognition.onerror = e => toast(`音声認識エラー: ${e.error}`);
+  mic.recognition.onend = () => { mic.recognition = null; button.classList.remove('rec'); status.textContent = ''; };
+  mic.recognition.start();
+  button.classList.add('rec');
+  status.textContent = '聞いています…　終わったらもう一度押す';
+}
+
+/** 入力欄の末尾に文字を足し、入力イベントを発火させて表示をそろえる */
+function appendToTextarea(textarea, text) {
+  textarea.value = (textarea.value ? textarea.value + ' ' : '') + text;
+  textarea.dispatchEvent(new Event('input'));
+}
+
+
+/* =========================================================================
+   12. 画面：今夜
+   -------------------------------------------------------------------------
+   input（書く）→ processing（まとめ中）→ insight（まとめカード）
+   ========================================================================= */
+
+/**
+ * 今夜の画面の状態
+ *   phase    : 'input' | 'processing' | 'insight'
+ *   hint     : 今夜の問い（AIが作る）
+ *   draft    : 入力欄の中身（まとめに失敗したとき戻せるように持っておく）
+ *   progress : まとめて貼ったときの進み具合 { done, current, total, weekly }
+ *   entry    : まとめカードに出す記録 / existing: 既に今日の記録があった / past: 過去の日の分として書いた
+ */
+let tonight = null;
+
+/** 今夜の画面を始める。今日の記録が既にあれば、まとめカードを出す（force のときは書き直し） */
+function startTonight(force = false) {
+  const existing = entryOn(recordDate(now()));
+  if (existing && !force) {
+    tonight = { phase: 'insight', entry: existing, existing: true };
+    return renderTonight();
+  }
+  const withSample = PARAMS.get('sample') === '1' && !store.entries.length;
+  tonight = { phase: 'input', hint: null, draft: withSample ? SAMPLE_DIARY : '' };
+  renderTonight();
+  loadHint();
+}
+
+/** 今夜の問いを作って、入力画面に差し込む（失敗しても書き出しの一文を出す） */
+async function loadHint() {
+  if (!hasKey()) return;
+  const el = () => $('#hintText');
+  try {
+    const hint = await generateHint();
+    if (tonight?.phase !== 'input') return;
+    tonight.hint = hint;
+    if (el()) el().textContent = hint;
+  } catch (e) {
+    if (el()) el().textContent = DEFAULT_HINT;
+  }
+}
+
+/** 今夜タブを、いまの段階（入力・読み込み中・結果）に合わせて描き直す */
+function renderTonight() {
+  const root = $('#tonight');
+  if (!tonight) { root.innerHTML = ''; return; }
+  if (tonight.phase === 'input')      return renderTonightInput(root);
+  if (tonight.phase === 'processing') return renderTonightProcessing(root);
+  if (tonight.phase === 'insight')    return renderTonightInsight(root);
+}
+
+/** 入力画面 */
+function renderTonightInput(root) {
+  const n = now(), today = recordDate(n), yesterday = addDays(today, -1);
+  // 今夜の問い：作り終わっていればそれ、作っている途中なら読み込み中の印、キーがなければ書き出しの一文
+  const hintHtml = tonight.hint ? esc(tonight.hint) : hasKey() ? '<span class="spin"></span>' : DEFAULT_HINT;
+
+  root.innerHTML = `<div class="page">
+    <div class="up s1">
+      <div class="row" style="justify-content:space-between">
+        <span class="xs muted" style="letter-spacing:.15em">${+today.slice(5, 7)}月${+today.slice(8, 10)}日（${weekdayOf(today)}）の夜</span>
+        <span class="xs muted" style="font-variant-numeric:tabular-nums">${hm(n)}</span>
+      </div>
+      <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:4px"><h1 class="brand">ねるトレ</h1><span class="tagline">今日の自分を、5分で。</span></div>
+    </div>
+
+    <div class="card dashed up s2">
+      <div class="label" style="color:rgba(201,149,107,.55);margin-bottom:6px">今夜の問い</div>
+      <p id="hintText" style="margin:0;font-size:14px;color:rgba(201,149,107,.8)">${hintHtml}</p>
+    </div>
+
+    <div class="card up s3"><textarea class="in" id="entryText" placeholder="${DEFAULT_HINT}">${esc(tonight.draft)}</textarea></div>
+    <div class="up s3" id="entryNote" style="margin:-8px 2px 0;font-size:12px;line-height:1.7"></div>
+
+    <div class="row up s4">
+      ${micButton('micBtn')}<span class="xs primary" id="micStatus"></span>
+      <span class="grow"></span>
+      <button class="btn primary" id="sendBtn" disabled>送る</button>
+    </div>
+  </div>`;
+
+  const textarea = $('#entryText'), sendBtn = $('#sendBtn'), note = $('#entryNote');
+  const help = `<span class="muted" style="opacity:.75">書き忘れた日は、1行目に「${mdw(yesterday)}」のように日付を書くと、その日の分になります。何日分かまとめて貼ることもできます。</span>`;
+
+  // 入力に合わせて、ボタンの文言と「どの日の分になるか」の案内を切り替える
+  const sync = () => {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.max(120, textarea.scrollHeight) + 'px';
+    tonight.draft = textarea.value;
+
+    const value = textarea.value.trim();
+    const r = value ? readEntry(value) : null;
+    let label = '送る', noteHtml = help, disabled = !value;
+    if (r?.mode === 'many') {
+      const rewrite = r.days.some(d => entryOn(d.date)) ? '（記録がある日は書き直します）' : '';
+      label = '整理する';
+      noteHtml = `<span class="primary">${mdw(r.days[0].date)}〜${mdw(r.days.at(-1).date)}の${r.days.length}日分として、1日ずつ整理します${rewrite}</span>`;
+    } else if (r?.mode === 'past') {
+      label = `${md(r.day.date)}の分を送る`;
+      noteHtml = `<span class="primary">${mdw(r.day.date)}の分として保存します${r.exists ? '（前の記録を書き直します）' : ''}</span>`;
+    } else if (r?.mode === 'future') {
+      disabled = true;
+      noteHtml = `<span style="color:var(--danger)">${mdw(r.day.date)}はまだ来ていない日です。今夜の分なら、日付を消して送ってください。</span>`;
+    }
+    sendBtn.textContent = label;
+    sendBtn.disabled = disabled;
+    note.innerHTML = noteHtml;
+  };
+
+  textarea.addEventListener('input', sync);
+  textarea.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submitEntry(); } });
+  sendBtn.onclick = submitEntry;
+  $('#micBtn').onclick = () => toggleMic(textarea, $('#micBtn'), $('#micStatus'));
+  sync();
+}
+
+/** まとめ中の画面（1日分：メッセージが切り替わる / まとめ貼り：1日ずつの進み具合） */
+function renderTonightProcessing(root) {
+  const p = tonight.progress;
+  if (p) {
+    const done = p.done.length;
+    root.innerHTML = `<div class="page">
+      <div class="up s1">
+        <h2 class="t">${p.weekly ? '1週間の振り返りを書いています' : '1日ずつ、読んでいます'}</h2>
+        <p class="body" style="margin:6px 0 0">${p.weekly ? '1週間分の記録を、読み直しています（20〜40秒）' : `${p.total}日分の日記として受け取りました`}</p>
+      </div>
+      <div class="stack up s2">
+        <div class="progress"><i style="width:${p.weekly ? 100 : Math.round(done / p.total * 100)}%"></i></div>
+        <p class="sm muted" style="margin:0"><span class="spin"></span>${p.weekly ? 'まとめています…' : `${mdw(p.current)}を読んでいます…（${Math.min(done + 1, p.total)}/${p.total}）`}</p>
+      </div>
+      <div class="stack" style="gap:6px">${p.done.map(d => `
+        <div class="row xs muted" style="gap:10px"><span style="width:6px;height:6px;border-radius:50%;background:var(--primary);opacity:.6"></span>${mdw(d)} — 整理できました</div>`).join('')}
+      </div>
+    </div>`;
+    return;
+  }
+
+  renderReading(root, tonight.reading);
+}
+
+/**
+ * 1日分を読んでいる画面。
+ * 書いた文章を一文ずつ灯して「読まれている」ことを見せ、下の一文は 読む → 照らす → まとめる の順に進める（繰り返さない）。
+ */
+function renderReading(root, { text, held }) {
+  const all = sentencesOf(text);
+  const sentences = all.length > 6 ? [...all.slice(0, 5), '…'] : (all.length ? all : [text]);
+  const messages = [
+    'あなたの言葉を、ゆっくり読んでいます',
+    held ? `${md(held.date)}に預かった「${esc(shorten(held.quote, 16))}」と照らしています` : '今日のあなたの言葉を拾っています',
+    'まとめを書いています',
+  ];
+
+  root.innerHTML = `<div class="reading fade">
+    <div class="reading-card">${sentences.map(t => `<p>${esc(t)}</p>`).join('')}</div>
+    <div class="reading-status" role="status"><span class="pulse"></span><span id="readingMsg">${messages[0]}</span></div>
+  </div>`;
+
+  const lines = $$('.reading-card p', root);
+  if (prefersReducedMotion()) { lines.forEach(p => p.classList.add('read')); return; }
+
+  // 一文ずつ灯す（最後まで行ったら、また頭から）
+  let current = 0;
+  lines[0]?.classList.add('lit');
+  const lineTimer = setInterval(() => {
+    const card = root.querySelector('.reading-card');
+    if (!document.body.contains(card) || card.classList.contains('done')) return clearInterval(lineTimer);   // 画面が変わった／まとめができた
+    lines[current]?.classList.replace('lit', 'read');
+    current = (current + 1) % lines.length;
+    if (current === 0) lines.forEach(p => p.classList.remove('read'));
+    lines[current]?.classList.add('lit');
+  }, 700);
+
+  // 下の一文を進める（最後の一文で止める）
+  let step = 0;
+  const messageTimer = setInterval(() => {
+    const el = $('#readingMsg');
+    // 最後の一文まで進んだとき、または「まとめができました」に変わったあとは止める（書き戻さない）
+    if (!el || el.dataset.finished || step >= messages.length - 1) return clearInterval(messageTimer);
+    step++;
+    el.innerHTML = messages[step];
+    el.classList.remove('fade'); void el.offsetWidth; el.classList.add('fade');
+  }, 1600);
+}
+
+/**
+ * まとめができたとき：AIが引用として拾った文だけを灯したまま残し、ほかの文を引かせる。
+ * 「あなたの言葉から、ここを拾いました」と見せてから、同じ言葉が並ぶまとめのカードへ移る。
+ * 深刻な内容の日は、言葉を強調しないよう演出を出さない。動きを減らす設定のときも出さない。
+ */
+async function finishReading(day) {
+  const card = $('#tonight .reading-card');
+  const message = $('#readingMsg');
+  if (!card || !message) return;
+  message.dataset.finished = '1';   // 下の一文を進めるタイマーに、もう書き換えないよう知らせる
+
+  const lines = $$('p', card);
+  const quotes = (day.quotes || []).map(normalizeQuote).filter(Boolean);
+  const isPicked = line => { const t = normalizeQuote(line.textContent); return t && quotes.some(q => t.includes(q) || q.includes(t)); };
+  const picked = day.safety === 'serious' ? [] : lines.filter(isPicked);
+
+  if (!picked.length || prefersReducedMotion()) {
+    message.textContent = 'まとめができました';
+    return;
+  }
+  lines.forEach(line => { line.classList.remove('lit', 'read'); line.classList.toggle('picked', picked.includes(line)); });
+  card.classList.add('done');
+  message.textContent = `あなたの言葉から、${picked.length}つを拾いました`;
+  await wait(PICKED_HOLD_MS);
+}
+
+/** まとめカード */
+function renderTonightInsight(root) {
+  const { entry, existing, past } = tonight;
+  const a = entry.a;
+  const dayWord = past ? 'この日' : '今日';
+  const status = past ? `${mdw(entry.date)}の記録として保存しました` : existing ? '今夜はもう記録があります' : '今夜の記録';
+  const secondButton = past ? '<button class="btn link" id="redoBtn">今夜を書く</button>'
+                     : existing ? '<button class="btn link" id="redoBtn">今夜をもう一度</button>' : '';
+
+  root.innerHTML = `<div class="page">
+    <div class="up s1 xs muted" style="opacity:.6">${[status, entry.time].filter(Boolean).map(esc).join('　')}</div>
+    ${a.safety === 'serious' ? helpBlock('serious') : ''}
+    <h2 class="t up s2">${esc(a.headline)}</h2>
+    <div class="up s3 row">${moodChip(a)}${a.late_night && a.safety !== 'serious' ? '<span class="chip plain">遅くまで</span>' : ''}</div>
+    ${a.quotes.map(q => quoteHtml(q, 'up s3')).join('')}
+
+    ${a.open_question ? `
+    <div class="card up s4">
+      <div class="label" style="margin-bottom:4px">預かった問い</div>
+      <p class="serif" style="margin:0;font-size:15px">「${esc(a.open_question.quote)}」</p>
+      <p class="xs muted" style="margin:6px 0 0">ひとばん寝かせておきます。後日の記録に答えが出ていたら、お知らせします。</p>
+    </div>` : ''}
+
+    ${a.answered.map(q => `
+    <div class="card up s4" style="border-color:rgba(201,149,107,.35)">
+      <div class="sec" style="margin-bottom:6px">${ICON.link}${esc(toMD(q.question_date))}に預かった問いに、${dayWord}のあなたが答えていました</div>
+      ${quoteHtml(q.evidence_quote)}
+      <p class="body" style="margin:6px 0 0">${esc(q.note)}</p>
+    </div>`).join('')}
+
+    ${a.rep ? `
+    <div class="card up s4">
+      <div class="label" style="margin-bottom:4px">${dayWord}の積み上げ</div>
+      <p class="serif" style="margin:0;font-size:16px;font-weight:500">${esc(a.rep)}</p>
+      ${measureLine(entry)}
+    </div>` : ''}
+
+    <div class="closing up s5">${esc(a.closing_line)} ${speakButton(a.closing_line)}</div>
+    ${a.safety === 'concern' ? helpBlock('concern') : ''}
+    <div class="row up s5" style="justify-content:center;gap:10px"><button class="btn ghost" id="toWeek">1週間を見る</button>${secondButton}</div>
+  </div>`;
+
+  $('#toWeek').onclick = () => showView('week');
+  const redo = $('#redoBtn');
+  if (redo) redo.onclick = () => startTonight(!past);   // 過去の日の分を書いた後は、今夜の入力へ
+  bindCommon(root);
+}
+
+/**
+ * 先週の振り返りで積み上がっていたものと同じ種類なら、先週の回数と今週の回数を並べて見せる（続けた分が見える）。
+ * 例：「人と話す」は先週1回。今週はこれで1回目
+ */
+function measureLine(entry) {
+  const lastWeek = lastWeekOf(entry.date);
+  if (!lastWeek || !entry.a.chargers.length) return '';
+
+  const categories = [...new Set(entry.a.chargers.map(c => c.category))];
+  const match = categories
+    .map(category => ({ category, last: (lastWeek.reps_summary || []).find(r => r.category.includes(category) || category.includes(r.category)) }))
+    .find(x => x.last);
+  if (!match) return '';
+
+  const monday = mondayOf(entry.date);
+  const countThisWeek = store.entries.filter(e => e.date >= monday && e.date <= entry.date && e.a.chargers.some(c => c.category === match.category)).length;
+  return `<p class="xs primary" style="margin:8px 0 0">「${esc(match.last.category)}」は先週${(match.last.dates || []).length}回。今週はこれで${countThisWeek}回目</p>`;
+}
+
+
+/* =========================================================================
+   13. 画面：1週間
+   ========================================================================= */
+
+/** 1週間の画面の状態：表示中の週（月曜の日付）と、詳細を開いている日 */
+const weekView = { cursor: null, selected: null };
+
+function renderWeek() {
+  const root = $('#week');
+  const keys = weekKeys();
+  if (!keys.length) {
+    root.innerHTML = `<div class="page"><div class="empty">まだ記録がありません。<br>「今夜」から、今日のことを書いて始めましょう。
+      <div style="margin-top:16px"><button class="btn tiny" id="goTonight">今夜を書く</button></div></div></div>`;
+    $('#goTonight').onclick = () => showView('tonight');
+    return;
+  }
+
+  // 表示する週：指定がなければ、記録がある最新の週
+  if (!keys.includes(weekView.cursor)) weekView.cursor = keys.at(-1);
+  const monday = weekView.cursor, index = keys.indexOf(monday);
+  const days = weekEntries(monday);
+  const byDate = Object.fromEntries(days.map(d => [d.date, d]));
+  if (!byDate[weekView.selected]) weekView.selected = null;
+  const week = store.weekly[monday];
+  const facts = weekFacts(days, []);   // グラフの帯・比較の表・回数は、いまの記録から毎回集計する
+
+  // 記録が1日だけの週：その日の記録を最初から開いて見せる（押さなくてもフィードバックが目に入るように）。
+  // 点が1つの「気分の流れ」は意味がないので、グラフは出さない
+  const singleDay = days.length === 1 ? days[0] : null;
+  const isThisWeek = monday === mondayOf(recordDate(now()));
+
+  // 深刻な日を含む週は、先頭に相談先を出す（1日だけの週は、その日の記録のカードに出るので重ねない）
+  const help = singleDay ? ''
+             : days.some(d => d.a.safety === 'serious') ? helpBlock('serious')
+             : days.filter(d => d.a.safety === 'concern').length >= 2 ? helpBlock('concern') : '';
+
+  // 振り返りがまだない週の案内
+  //   2日以上 … 振り返りを作るボタン
+  //   1日だけ … 今の週なら「もう1日書くと振り返りが出る」とだけ伝える（「足りない」とは言わない）。過去の週では何も出さない
+  //（振り返りは複数の日を比べて初めて言えることだけを書くので、1日分では作らない）
+  const generateCard = !singleDay ? `
+    <div class="card dashed up s4 stack">
+      <p class="body" style="margin:0">前に出た問いに答えが出ていないか／何度も出ていた声や、気分が戻った日／前半と後半で何が変わったか——を、この週の記録から引き出します。</p>
+      <button class="btn primary block" id="genWeek">振り返りを書いてもらう</button>
+    </div>`
+    : isThisWeek ? `
+    <div class="card dashed up s4"><p class="body" style="margin:0">もう1日書くと、ここに1週間の振り返りが出ます。</p></div>`
+    : '';
+
+  const dayDetail = singleDay ? renderDayDetail(singleDay, { closable: false })
+                  : weekView.selected ? renderDayDetail(byDate[weekView.selected]) : '';
+
+  root.innerHTML = `<div class="page">
+    <div class="row up s1" style="justify-content:space-between">
+      <button class="btn link" id="wPrev" ${index === 0 ? 'disabled' : ''}>‹ 前の週</button>
+      <span style="font-weight:500;font-size:14px">${md(monday)} 〜 ${md(addDays(monday, 6))}</span>
+      <button class="btn link" id="wNext" ${index === keys.length - 1 ? 'disabled' : ''}>次の週 ›</button>
+    </div>
+    ${help}
+    ${singleDay ? '' : `<div class="up s2">${moodChart(monday, days, facts)}</div>`}
+    <div id="dayDetail">${dayDetail}</div>
+    ${week ? renderWeekly(week, facts) : generateCard}
+  </div>`;
+
+  // 前後の週（記録がある週だけをたどる）
+  $('#wPrev').onclick = () => { weekView.cursor = keys[index - 1]; weekView.selected = null; renderWeek(); };
+  $('#wNext').onclick = () => { weekView.cursor = keys[index + 1]; weekView.selected = null; renderWeek(); };
+
+  // グラフの列を押すと、その日の記録を開く（もう一度押すと閉じる）
+  $$('.wk-col:not(.empty)', root).forEach(col => {
+    col.onclick = () => {
+      weekView.selected = weekView.selected === col.dataset.d ? null : col.dataset.d;
+      renderWeek();
+      if (weekView.selected) setTimeout(() => $('#dayDetail').scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+    };
+  });
+
+  // その日の記録の「閉じる」：カードを閉じて、グラフの位置に戻る
+  const closeDay = $('#dayClose');
+  if (closeDay) closeDay.onclick = () => {
+    weekView.selected = null;
+    renderWeek();
+    setTimeout(() => $('.wk')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  };
+
+  // 振り返りを作る（記録が増えた週は振り返りが消えるので、ここからまた作れる）
+  const genButton = $('#genWeek');
+  if (genButton) genButton.onclick = async () => {
+    if (!hasKey()) return showKeyOverlay();
+    genButton.disabled = true;
+    genButton.innerHTML = '<span class="spin"></span>記録を読み直しています…（20〜40秒）';
+    try { await generateWeekly(monday); } catch (e) { toast(friendlyError(e)); }
+    renderWeek();
+  };
+
+  bindCommon(root);
+}
+
+/**
+ * 気分の流れ（1本の折れ線）＋ その日に戻ったきっかけ（小さな文字ラベル）。
+ * その週「あった日」の気分がいちばん高く出ていたもの（比較の表の1位）の日に、うっすら琥珀色の帯を付ける。
+ * 振り返りの「傾向」カードの比較と同じ結論を、グラフでも目で確かめられるようにするため。
+ * 列そのものがボタン（押すとその日の詳細）。SVG とラベルは列の上に重ね、押す操作は列に通す。
+ */
+function moodChart(monday, days, facts) {
+  if (!days.length) return '';
+  const W = 350, H = 96, TOP = 12, BOTTOM = 12;
+  const x = i => W * (i + 0.5) / 7;                         // 7列の中心（下のラベルと揃う）
+  const y = mood => TOP + (H - TOP - BOTTOM) * (2 - mood) / 4;   // 気分 -2〜+2 → 下〜上
+
+  const top = facts.trigger_table.find(r => r.diff > 0);   // 帯を付ける対象（差がプラスのものだけ）
+  const columns = [...Array(7)].map((_, i) => {
+    const date = addDays(monday, i);
+    const entry = days.find(d => d.date === date);
+    const categories = entry ? [...new Set(entry.a.chargers.map(c => c.category))] : [];
+    return {
+      i, date, entry,
+      tags: [...new Set(categories.map(c => CHARGER_META[c]?.tag).filter(Boolean))],
+      highlight: !!top && categories.some(c => top.members.includes(c)),
+      selected: weekView.selected === date,
+    };
+  });
+  const points = columns.filter(c => c.entry);
+  const line = points.map((p, j) => `${j ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.entry.a.mood).toFixed(1)}`).join(' ');
+  const area = points.length > 1 ? `${line} L${x(points.at(-1).i).toFixed(1)},${H} L${x(points[0].i).toFixed(1)},${H} Z` : '';
+
+  return `<div class="wk">
+    <div class="wk-cols">${columns.map(c => `
+      <button class="wk-col ${c.entry ? '' : 'empty'} ${c.highlight ? 'highlight' : ''} ${c.selected ? 'sel' : ''}" data-d="${c.date}" ${c.entry ? '' : 'disabled'} aria-label="${mdw(c.date)}の記録を見る"></button>`).join('')}
+    </div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+      <defs><linearGradient id="moodFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c9956b" stop-opacity=".22"/><stop offset="100%" stop-color="#c9956b" stop-opacity="0"/></linearGradient></defs>
+      <line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="rgba(232,226,217,.08)" stroke-dasharray="2 4"/>
+      ${area ? `<path d="${area}" fill="url(#moodFill)"/>` : ''}
+      ${points.length > 1 ? `<path d="${line}" fill="none" stroke="#c9956b" stroke-width="1.6" stroke-linejoin="round"/>` : ''}
+      ${points.map(p => `<circle cx="${x(p.i)}" cy="${y(p.entry.a.mood)}" r="${p.selected ? 5 : 3.5}" fill="${p.selected ? '#c9956b' : '#0d0c14'}" stroke="#c9956b" stroke-width="1.6"/>`).join('')}
+    </svg>
+    <div class="wk-labels">${columns.map(c => `
+      <div class="${c.selected ? 'sel' : ''}"><span class="wd">${WEEKDAYS[(c.i + 1) % 7]}</span><span class="d">${md(c.date)}</span><span class="tag">${c.tags.join('・') || '&nbsp;'}</span></div>`).join('')}
+    </div>
+  </div>
+  <div class="wk-legend"><span>線＝気分の流れ（上ほど良い）</span>${top ? `<span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px"><i></i>${esc(CHARGER_META[top.trigger]?.dayLabel || top.trigger + 'の日')}</span>` : ''}</div>
+  <div class="xs muted" style="opacity:.6;margin-top:2px">日付を押すと、その日の記録が開きます</div>`;
+}
+
+/**
+ * グラフで選んだ日（または1日だけの週のその日）の記録。
+ * @param {{closable?: boolean}} options  closable:false のときは「閉じる」を出さない（1日だけの週で最初から開いているとき）
+ */
+function renderDayDetail(entry, { closable = true } = {}) {
+  const a = entry.a;
+  const sourceLabel = { import: '（まとめて記録）', past: '（あとから記録）' }[entry.source] || '';
+  const chips = (label, items, cls = 'date') => items.length
+    ? `<div class="sm"><span class="muted">${label}</span>　${items.map(t => `<span class="chip ${cls}">${esc(t)}</span>`).join(' ')}</div>` : '';
+
+  return `<div class="card stack fade">
+    <div class="day-head">
+      <div>
+        <p class="title">${mdw(entry.date)}の記録</p>
+        <div class="xs muted">${[entry.time, sourceLabel].filter(Boolean).join('　')}</div>
+      </div>
+      ${closable ? `<button class="day-close" id="dayClose" aria-label="この日の記録を閉じて、グラフに戻る">${ICON.close}閉じる</button>` : ''}
+    </div>
+    ${a.safety === 'serious' ? helpBlock('serious') : ''}
+    <h2 class="t" style="font-size:18px">${esc(a.headline)}</h2>
+    <div class="row" style="flex-wrap:wrap;gap:6px">${moodChip(a)}${a.events.map(ev => `<span class="chip plain">${esc(ev)}</span>`).join('')}</div>
+    ${a.quotes.map(q => quoteHtml(q)).join('')}
+    ${chips('心の声', a.voices.map(v => v.label))}
+    ${chips('戻したもの', a.chargers.map(c => c.category))}
+    ${chips('削ったもの', a.drainers.map(c => c.category), 'date plain')}
+    ${a.open_question ? `<div><div class="label" style="margin-bottom:2px">預かった問い</div><p class="serif" style="margin:0;font-size:14px">「${esc(a.open_question.quote)}」</p></div>` : ''}
+    ${a.answered.map(q => `
+      <div><div class="sec">${ICON.link}${esc(toMD(q.question_date))}の問いに答えていました</div>
+        <p class="serif" style="margin:4px 0 0;font-size:14px">「${esc(q.evidence_quote)}」</p><p class="xs muted" style="margin:2px 0 0">${esc(q.note)}</p></div>`).join('')}
+    ${a.rep ? `<div><div class="label" style="margin-bottom:2px">積み上げ</div><p class="serif" style="margin:0;font-size:15px">${esc(a.rep)}</p></div>` : ''}
+    <div class="closing" style="padding:4px 0 0">${esc(a.closing_line)}</div>
+    <details><summary>元の記録を見る</summary><pre>${esc(entry.raw)}</pre></details>
+  </div>`;
+}
+
+/**
+ * 週の振り返り。評価の観点「気づき・傾向・変化」をそのまま3枚のカードにする。
+ * 各カードは「一文＋根拠1つ」だけを見せ、解説・残りの引用・数値の表は「くわしく」の中に置く。
+ */
+function renderWeekly(week, facts) {
+  return `
+    <div class="stack up s4" style="gap:6px">
+      <h2 class="t" style="font-size:20px">${esc(week.week_headline)}</h2>
+      <p class="body" style="margin:0">${esc(week.story)}</p>
+    </div>
+    ${insightCard(week)}
+    ${tendencyCard(week, facts)}
+    ${changeCard(week, facts)}
+    <div class="card dashed up s7">
+      <div class="label" style="color:rgba(201,149,107,.55);margin-bottom:6px">来週の1メニュー</div>
+      <p class="serif" style="margin:0;font-size:15px">${esc(week.next_week_menu)}</p>
+    </div>
+    <div class="closing up s7">${esc(week.closing_line)} ${speakButton(week.closing_line)}</div>`;
+}
+
+/** カードの枠：札（気づき／傾向／変化）＋ 中身 ＋ 「くわしく」 */
+function weekCard(tag, delay, body, detail) {
+  return `<div class="card insight up ${delay}">
+    <span class="tag">${tag}</span>
+    ${body}
+    ${detail ? `<details><summary>くわしく</summary><div>${detail}</div></details>` : ''}
+  </div>`;
+}
+
+/** 気づき：前に出た問いに、後の日の言葉が答えていた（伏線回収） */
+function insightCard(week) {
+  const [first, ...others] = week.answered_questions.filter(q => q.question_quote && q.answer_quote);
+  const stillOpen = week.still_open.length
+    ? `<p class="xs muted" style="margin:0">まだ預かっている問い：${week.still_open.map(q => `${esc(toMD(q.date))}「${esc(q.quote)}」`).join('、')}</p>` : '';
+
+  if (!first) return weekCard('気づき', 's5',
+    `<p class="lead">この週は、まだ答えが返ってきた問いはありません。</p>${stillOpen}`);
+
+  const pair = q => `
+    <div class="pair"><span class="from">${esc(mdw(q.question_date))}の問い</span>${quoteHtml(q.question_quote)}</div>
+    <div class="pair"><span class="from">→ ${esc(mdw(q.answer_date))}のあなた</span>${quoteHtml(q.answer_quote)}</div>`;
+
+  return weekCard('気づき', 's5',
+    `<p class="lead">前に出た問いに、答えが出ていました</p>${pair(first)}${stillOpen}`,
+    `<p class="body" style="margin:0">${esc(first.reflection)}</p>` + others.map(q => pair(q) + `<p class="body" style="margin:0">${esc(q.reflection)}</p>`).join(''));
+}
+
+/** 傾向：何度も出ていた声 ＋ 気分が戻った日（あった日となかった日の比較） */
+function tendencyCard(week, facts) {
+  const voice = week.recurring_voices[0];
+  const rows = facts.trigger_table;   // 差の大きい順。上の2つをカードに、残りは「くわしく」へ
+  const lead = week.tendency_line || week.connections[0]?.observation || '';
+
+  const body = `
+    ${voice ? `<p class="sm" style="margin:0">「${esc(voice.label)}」　${dateChips(voice.dates)}</p>` : ''}
+    <p class="lead">${esc(lead)}</p>
+    ${rows.slice(0, 2).map(compareRowHtml).join('')}
+    ${rows.length ? `<p class="xs muted" style="margin:0">数字は、その日の気分（-2〜+2）の平均です。</p>` : ''}`;
+
+  const detail = [
+    ...(voice ? [voice.quotes.map(q => quoteHtml(q)).join(''),
+                 voice.quiet_dates.length ? `<div class="xs muted">静かだった日：${dateChips(voice.quiet_dates)}</div>` : '',
+                 `<p class="body" style="margin:0">${esc(voice.reflection)}</p>`] : []),
+    rows.slice(2).map(compareRowHtml).join(''),
+    week.connections.map(c => `<p class="body" style="margin:0"><b style="color:var(--foreground);font-weight:500">${esc(c.trigger)}</b>　${esc(c.observation)}</p>`).join(''),
+  ].join('');
+
+  return weekCard('傾向', 's6', body, detail);
+}
+
+/** 変化：前半から後半への言葉の変わり方 ＋ 積み上がったもの（回数） */
+function changeCard(week, facts) {
+  const lead = week.change_line || week.shift.observation;
+  const counts = accumulatedCounts(facts);
+
+  const body = `
+    <p class="lead">${esc(lead)}</p>
+    ${counts ? `<p class="sm" style="margin:0"><span class="muted">積み上がったもの</span>　${counts}</p>` : ''}`;
+
+  const detail = `
+    <div><span class="xs muted">前半 ${dateChips(facts.first_half?.dates)}</span><p class="sm" style="margin:2px 0 0">${esc(week.shift.first_half)}</p></div>
+    <div><span class="xs muted">後半 ${dateChips(facts.second_half?.dates)}</span><p class="sm" style="margin:2px 0 0">${esc(week.shift.second_half)}</p></div>
+    <p class="body" style="margin:0">${esc(week.shift.observation)}</p>
+    ${week.reps_summary.map(r => `<div class="measure"><span class="l">${chargerIcon(r.category)} ${esc(r.category)}</span><span>${dateChips(r.dates)}</span></div>`).join('')}
+    ${week.vs_last_week ? `<p class="body" style="margin:0">先週と比べて：${esc(week.vs_last_week)}</p>` : ''}`;
+
+  return weekCard('変化', 's7', body, detail);
+}
+
+/** 「あった日と、なかった日」の比較の1行 */
+function compareRowHtml(row) {
+  const signed = v => (v > 0 ? '+' : '') + v;
+  return `<div>
+    <div class="xs muted" style="margin-bottom:6px">${chargerIcon(row.trigger)} ${esc(row.trigger)}　<span style="opacity:.7">${row.dates.map(md).join('・')}</span></div>
+    <div class="pn"><div class="pos"><span>あった日</span><b>${signed(row.avg_mood_with)}</b></div><div class="neg"><span>なかった日</span><b>${signed(row.avg_mood_without)}</b></div></div>
+  </div>`;
+}
+
+/**
+ * 積み上がったものの回数（例：人と関わる 2回・運動 2回）。コードの集計から作る。
+ * 比べられない（日数が少ない）ものも数には入れる。まとまりに入る分類は、まとまりの回数で1つにする。
+ */
+function accumulatedCounts(facts) {
+  const groups = facts.groups || [];
+  const singles = (facts.chargers || []).filter(c => !groups.some(g => g.members.includes(c.category)));
+  return [...groups.map(g => ({ label: g.category, count: g.dates.length })),
+          ...singles.map(c => ({ label: CHARGER_META[c.category]?.tag || c.category, count: c.dates.length }))]
+    .filter(r => r.label !== 'その他')
+    .sort((a, b) => b.count - a.count)
+    .map(r => `${esc(r.label)} ${r.count}回`).join('・');
+}
+
+
+/* =========================================================================
+   14. 起動
+   ========================================================================= */
+
+/** タブの切り替え */
+function showView(view) {
+  $$('section.view').forEach(s => s.classList.toggle('active', s.id === `view-${view}`));
+  $$('nav button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  window.scrollTo(0, 0);
+  if (view === 'week') renderWeek();
+  if (view === 'tonight') tonight ? renderTonight() : startTonight();
+}
+
+/** 背景の星を散らす */
+function scatterStars(count = 36) {
+  const sky = $('#stars');
+  for (let i = 0; i < count; i++) {
+    const star = document.createElement('i');
+    const size = (Math.random() * 1.4 + 0.4).toFixed(1);
+    star.style.cssText = `left:${Math.random() * 100}%;top:${Math.random() * 100}%;width:${size}px;height:${size}px;`
+                       + `--d:${(2 + Math.random() * 4).toFixed(1)}s;animation-delay:-${(Math.random() * 4).toFixed(1)}s`;
+    sky.appendChild(star);
+  }
+}
+
+// タブ・初回のキー入力・相談先カードの「閉じる」
+$$('nav button').forEach(b => { b.onclick = () => showView(b.dataset.view); });
+$('#keySaveBtn').onclick = () => {
+  const key = $('#apiKeyFirst').value.trim();
+  if (!key) return toast('APIキーを入力してください');
+  store.apiKey = key;
+  saveStore();
+  $('#keyOverlay').classList.remove('show');
+  tonight = null;
+  showView('tonight');
+};
+$('#safetyCloseBtn').onclick = () => $('#safetyOverlay').classList.remove('show');
+
+scatterStars();
+$('#helplines').innerHTML = helplinesHtml(HELPLINES);
+if (!hasKey()) showKeyOverlay();
+showView('tonight');
+</script>
+</body>
+</html>
