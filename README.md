@@ -7,6 +7,9 @@ HTMLファイル1つで動きます。サーバーもビルドも不要です。
 
 第24回 DMM生成AI CAMP コンペ（AIジャーナリングアプリ）への提出作品です。
 
+**デモ: https://hiwa-tech-1223.github.io/nerutore/**
+（使うには、ご自分の OpenAI APIキーが必要です。キーはお使いのブラウザにだけ保存され、どこにも送信されません。）
+
 ![今夜の画面](docs/images/tonight-input.png)
 
 ## できること
@@ -28,12 +31,23 @@ HTMLファイル1つで動きます。サーバーもビルドも不要です。
 
 ## 使い方
 
-1. [nerutore.html](nerutore.html) をダウンロードして、ブラウザで開きます。
+1. [デモページ](https://hiwa-tech-1223.github.io/nerutore/) を開きます。
 2. 最初に表示される画面で、OpenAI APIキーを入力します。キーはそのブラウザにだけ保存され、どこにも送信されません。
 3. 今日のことを書くか、マイクで話して「送る」を押します。
 4. 2日以上書いたら、「1週間」のタブで振り返りを作れます。
 
 記録はブラウザのlocalStorageに保存されます。サーバーには何も保存されません。
+
+### 手元のファイルで動かす場合
+
+ダウンロードした `nerutore.html` をダブルクリックで開くと、OpenAIへの通信がブラウザにブロックされ、AIの機能だけが動きません（画面は開きます）。
+手元で動かすときは、簡単なサーバー経由で開いてください。
+
+```bash
+cd ダウンロードしたフォルダ
+python3 -m http.server 8000
+# ブラウザで http://localhost:8000/nerutore.html を開く
+```
 
 ### 動作確認用のURLパラメータ
 
@@ -72,6 +86,7 @@ AIの呼び出しは LangChain.js（CDNから読み込み）で組み立て、�
 | ファイル | 内容 |
 |---|---|
 | [nerutore.html](nerutore.html) | アプリ本体（単一HTML）。APIキーは空にしてあります。 |
+| [index.html](index.html) | デモページを開いたときに、アプリへ転送するだけのページ。 |
 | [docs/design-notes.md](docs/design-notes.md) | 制作判断メモ。何を記録するアプリか、プロンプトの狙い、UXの工夫。 |
 | [docs/prompts.txt](docs/prompts.txt) | AIへの指示（プロンプト）の全文と、渡している情報の設計。 |
 | [docs/video-script.md](docs/video-script.md) | 動作動画の台本。 |
