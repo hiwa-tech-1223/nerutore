@@ -30,10 +30,12 @@ const LIMIT_TOTAL_PER_DAY  = 600;   // 全体で1日あたりの呼び出し回�
 const MAX_BODY_BYTES       = 300 * 1024;
 const MAX_COMPLETION_TOKENS = 6000;
 
-const corsHeaders = origin => ({
+// 許可するヘッダーは、ブラウザが聞いてきたものをそのまま返す
+// （OpenAIのSDKは x-stainless-… などの独自ヘッダーを付けるため）
+const corsHeaders = (origin, requestedHeaders) => ({
   'Access-Control-Allow-Origin': origin,
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': requestedHeaders || 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
   Vary: 'Origin',
 });
@@ -62,7 +64,7 @@ export default {
 
     if (request.method === 'OPTIONS') {
       if (!ALLOWED_ORIGINS.includes(origin)) return deny(403, 'このページからは利用できません', origin);
-      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+      return new Response(null, { status: 204, headers: corsHeaders(origin, request.headers.get('Access-Control-Request-Headers')) });
     }
     if (request.method !== 'POST') return deny(405, 'POST のみ受け付けます', origin);
     if (!ALLOWED_ORIGINS.includes(origin)) return deny(403, 'このページからは利用できません', origin);
