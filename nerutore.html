@@ -805,7 +805,13 @@ function openQuestions(beforeDate) {
    OpenAI の Chat Completions API を直接呼ぶ（callOpenAIDirect）。
    ========================================================================= */
 
-const apiKey = () => (DEFAULT_API_KEY || store.apiKey || '').trim();
+// 公開デモ（?demo を付けて開いたとき）だけ、自分のキーの代わりに中継サーバーを使う。
+// 中継サーバー側がこちらのキーを付けてOpenAIを呼ぶので、キーはこのファイルに書かない。
+const DEMO_PROXY = '';   // 例: https://nerutore-demo.<アカウント>.workers.dev
+const demoMode   = PARAMS.has('demo') && !!DEMO_PROXY;
+const apiBase    = () => (demoMode ? DEMO_PROXY : 'https://api.openai.com');
+
+const apiKey = () => (demoMode ? 'demo' : (DEFAULT_API_KEY || store.apiKey || '').trim());
 const hasKey = () => !!apiKey();
 
 /** APIキーを取り出す。未設定ならエラーにして、AIを呼ぶ処理を止める */
@@ -842,7 +848,7 @@ function structuredChain(schema, name, model) {
   ]);
   const llm = new LC.ChatOpenAI({
     apiKey: requireKey(), model, timeout: 120000, maxRetries: 1,
-    configuration: { dangerouslyAllowBrowser: true },
+    configuration: { dangerouslyAllowBrowser: true, baseURL: `${apiBase()}/v1` },
   });
   return prompt.pipe(llm.withStructuredOutput(schema, { method: 'jsonSchema', strict: true, name }));
 }
@@ -863,7 +869,7 @@ async function callAI({ instructions, input, schema, name, model = MODEL, maxTok
 /** フォールバック：OpenAI Chat Completions を fetch で直接呼ぶ */
 async function callOpenAIDirect({ messages, schema, name, model, maxTokens }) {
   const isReasoningModel = /^gpt-5|^o\d/.test(model);   // 推論モデルは考える分のトークンも要る
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch(`${apiBase()}/v1/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${requireKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -896,7 +902,7 @@ async function transcribe(blob, ext) {
   form.append('model', STT_MODEL);
   form.append('language', 'ja');
   form.append('prompt', '寝る前の日記。今日の出来事や気持ちを話しています。');   // 聞き取りのヒント
-  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+  const res = await fetch(`${apiBase()}/v1/audio/transcriptions`, {
     method: 'POST', headers: { Authorization: `Bearer ${requireKey()}` }, body: form,
   });
   if (!res.ok) throw new Error(`文字起こしに失敗 ${res.status} ${await errorMessageOf(res)}`);
@@ -922,7 +928,7 @@ async function speak(text, button) {
   speaker.button = button;
   button?.classList.add('playing');
   try {
-    const res = await fetch('https://api.openai.com/v1/audio/speech', {
+    const res = await fetch(`${apiBase()}/v1/audio/speech`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${requireKey()}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: TTS_MODEL, voice: TTS_VOICE, input: text, instructions: PROMPTS.tts, response_format: 'mp3' }),
